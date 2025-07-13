@@ -1,0 +1,101 @@
+<?xml version="1.0"?>
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="berry_good_bot">
+
+  <!-- ===== 파라미터 ===== -->
+  <xacro:property name="link_radius"    value="0.05"/>   <!-- 0.02 ▶ 0.05 m -->
+  <xacro:property name="L1"             value="0.25"/>
+  <xacro:property name="L2"             value="0.20"/>
+  <xacro:property name="L3"             value="0.15"/>
+
+  <!-- ===== 간단 원통 링크 (축 = +X) ===== -->
+  <xacro:macro name="cyl_link" params="name length radius">
+    <link name="${name}">
+      <!-- ◀ 원통 중심을 +X 쪽으로, 축을 X에 맞춰 Y축(+90°) 회전 -->
+      <inertial>
+        <origin xyz="${length/2} 0 0" rpy="0 1.57079632679 0"/>
+        <mass value="0.4"/>
+        <inertia ixx="0.002" iyy="0.002" izz="0.001"
+                 ixy="0"   ixz="0"   iyz="0"/>
+      </inertial>
+      <visual>
+        <origin xyz="${length/2} 0 0" rpy="0 1.57079632679 0"/>
+        <geometry><cylinder length="${length}" radius="${radius}"/></geometry>
+        <material name="Cyan"><color rgba="0 1 1 1"/></material>
+      </visual>
+      <collision>
+        <origin xyz="${length/2} 0 0" rpy="0 1.57079632679 0"/>
+        <geometry><cylinder length="${length}" radius="${radius}"/></geometry>
+      </collision>
+    </link>
+  </xacro:macro>
+
+  <!-- ===== 링크 & 조인트 체인 ===== -->
+  <link name="base_link"/>
+
+  <!-- Z축 선형 스크류 -->
+  <link name="screw_link"/>
+  <joint name="screw_joint" type="prismatic">
+    <parent link="base_link"/>
+    <child  link="screw_link"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="0.0" upper="1.0" velocity="0.3" effort="100"/>
+  </joint>
+
+  <!-- 3-DOF 팔 -->
+  <xacro:cyl_link name="link1" length="${L1}" radius="${link_radius}"/>
+  <joint name="joint1" type="revolute">
+    <parent link="screw_link"/>
+    <child  link="link1"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <axis  xyz="0 0 1"/>
+    <limit lower="-${pi}" upper="${pi}" velocity="1.5" effort="50"/>
+  </joint>
+
+  <xacro:cyl_link name="link2" length="${L2}" radius="${link_radius}"/>
+  <joint name="joint2" type="revolute">
+    <parent link="link1"/>
+    <child  link="link2"/>
+    <origin xyz="${L1} 0 0" rpy="0 0 0"/>
+    <axis  xyz="0 0 1"/>
+    <limit lower="-${pi}" upper="${pi}" velocity="1.5" effort="40"/>
+  </joint>
+
+  <xacro:cyl_link name="link3" length="${L3}" radius="${link_radius}"/>
+  <joint name="joint3" type="revolute">
+    <parent link="link2"/>
+    <child  link="link3"/>
+    <origin xyz="${L2} 0 0" rpy="0 0 0"/>
+    <axis  xyz="0 0 1"/>
+    <limit lower="-${pi}" upper="${pi}" velocity="2.0" effort="30"/>
+  </joint>
+
+  <!-- EEF 축 회전 -->
+  <link  name="wrist_link"/>
+  <joint name="wrist_roll_joint" type="continuous">
+    <parent link="link3"/>
+    <child  link="wrist_link"/>
+    <origin xyz="${L3} 0 0" rpy="0 0 0"/>
+    <axis  xyz="1 0 0"/>
+    <limit effort="10" velocity="2.5"/>
+  </joint>
+
+  <!-- 그리퍼 -->
+  <link  name="gripper_base"/>
+  <joint name="gripper_joint" type="prismatic">
+    <parent link="wrist_link"/>
+    <child  link="gripper_base"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <axis  xyz="0 1 0"/>
+    <limit lower="0.0" upper="0.04" velocity="0.02" effort="20"/>
+  </joint>
+
+  <!-- 작업 좌표계 -->
+  <link  name="tool0"/>
+  <joint name="tool0_fixed" type="fixed">
+    <parent link="gripper_base"/>
+    <child  link="tool0"/>
+    <origin xyz="0 0 0.05" rpy="0 0 0"/>
+  </joint>
+
+</robot>
