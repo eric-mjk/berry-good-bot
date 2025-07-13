@@ -1,0 +1,14 @@
+<?xml version="1.0"?>
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="berry_good_bot">
+    <xacro:arg name="initial_positions_file" default="initial_positions.yaml" />
+
+    <!-- Import berry_good_bot urdf file -->
+    <xacro:include filename="$(find strawberry_description)/urdf/berry_good_bot_sampleURDF.xacro" />
+
+    <!-- Import control_xacro -->
+    <xacro:include filename="berry_good_bot.ros2_control.xacro" />
+
+
+    <xacro:berry_good_bot_ros2_control name="FakeSystem" initial_positions_file="$(arg initial_positions_file)"/>
+
+</robot>

@@ -39,7 +39,7 @@
     <child  link="screw_link"/>
     <origin xyz="0 0 0" rpy="0 0 0"/>
     <axis xyz="0 0 1"/>
-    <limit lower="0.0" upper="1.0" velocity="0.3" effort="100"/>
+    <limit lower="0.0" upper="1.0" velocity="0.3" effort="100.0"/>
   </joint>
 
   <!-- 3-DOF 팔 -->
@@ -49,7 +49,7 @@
     <child  link="link1"/>
     <origin xyz="0 0 0" rpy="0 0 0"/>
     <axis  xyz="0 0 1"/>
-    <limit lower="-${pi}" upper="${pi}" velocity="1.5" effort="50"/>
+    <limit lower="-${pi}" upper="${pi}" velocity="1.5" effort="50.0"/>
   </joint>
 
   <xacro:cyl_link name="link2" length="${L2}" radius="${link_radius}"/>
@@ -58,7 +58,7 @@
     <child  link="link2"/>
     <origin xyz="${L1} 0 0" rpy="0 0 0"/>
     <axis  xyz="0 0 1"/>
-    <limit lower="-${pi}" upper="${pi}" velocity="1.5" effort="40"/>
+    <limit lower="-${pi}" upper="${pi}" velocity="1.5" effort="40.0"/>
   </joint>
 
   <xacro:cyl_link name="link3" length="${L3}" radius="${link_radius}"/>
@@ -67,7 +67,7 @@
     <child  link="link3"/>
     <origin xyz="${L2} 0 0" rpy="0 0 0"/>
     <axis  xyz="0 0 1"/>
-    <limit lower="-${pi}" upper="${pi}" velocity="2.0" effort="30"/>
+    <limit lower="-${pi}" upper="${pi}" velocity="2.0" effort="30.0"/>
   </joint>
 
   <!-- EEF 축 회전 -->
@@ -77,7 +77,7 @@
     <child  link="wrist_link"/>
     <origin xyz="${L3} 0 0" rpy="0 0 0"/>
     <axis  xyz="1 0 0"/>
-    <limit effort="10" velocity="2.5"/>
+    <limit effort="10.0" velocity="2.5"/>
   </joint>
 
   <!-- 그리퍼 -->
@@ -87,7 +87,7 @@
     <child  link="gripper_base"/>
     <origin xyz="0 0 0" rpy="0 0 0"/>
     <axis  xyz="0 1 0"/>
-    <limit lower="0.0" upper="0.04" velocity="0.02" effort="20"/>
+    <limit lower="0.0" upper="0.04" velocity="0.02" effort="20.0"/>
   </joint>
 
   <!-- 작업 좌표계 -->
