@@ -1,0 +1,14 @@
+<root BTCPP_format="4">
+  <BehaviorTree ID="HarvestMain">
+    <Sequence name="HarvestSequence">
+      <SubTree ID="FindBerry"/>
+      <SubTree ID="ApproachBerry"/>
+      <SubTree ID="ServoAndCut"/>
+    </Sequence>
+  </BehaviorTree>
+
+  <!-- ros_pkg 속성 제거, 상대경로만 사용 -->
+  <include path="strawberry_harvest/FindBerry.xml"/>
+  <include path="strawberry_harvest/ApproachBerry.xml"/>
+  <include path="strawberry_harvest/ServoAndCut.xml"/>
+</root>

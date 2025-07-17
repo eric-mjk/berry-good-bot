@@ -1,0 +1,5 @@
+<library path="libstrawberry_bt_nodes">
+  <class name="StrawberryPerception" type="FakePerception" base_class_type="BT::SyncActionNode"/>
+  <class name="RoughApproach"        type="FakeApproach"   base_class_type="BT::SyncActionNode"/>
+  <class name="ServoAndCut"          type="FakeServoCut"   base_class_type="BT::SyncActionNode"/>
+</library>

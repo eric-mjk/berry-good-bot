@@ -1,0 +1,8 @@
+bt:
+  tree_file: ${hydra:runtime.cwd}/behavior_trees/strawberry_harvest.xml
+  plugins:
+  - strawberry_bt_nodes
+  find:
+    retry: 3
+robot: {}
+env: {}

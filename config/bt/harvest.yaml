@@ -1,0 +1,3 @@
+tree_file: ${hydra:runtime.cwd}/behavior_trees/strawberry_harvest.xml
+plugins:
+  - strawberry_bt_nodes  # 로드할 so 이름

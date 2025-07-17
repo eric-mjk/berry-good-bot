@@ -1,0 +1,7 @@
+bt:
+  tree_file: strawberry_harvest.xml
+  nodes:
+    - { name: "StrawberryPerception", impl: "PerceptionNodeLite6D" }
+    - { name: "RoughApproach", impl: "ApproachNode" }
+    - { name: "ServoToBerry", impl: "MoveItServoNode" }
+    - { name: "CutBerry", impl: "GripperCutNode" }

@@ -1,0 +1,9 @@
+defaults:
+  - _self_          # <= 반드시 첫 항목(또는 마지막)에 추가
+  - bt: harvest
+  - robot: fake
+  - env: sim
+
+bt:
+  find:
+    retry: 3

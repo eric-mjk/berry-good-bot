@@ -1,0 +1,7 @@
+<root BTCPP_format="4">
+  <BehaviorTree ID="FindBerry">
+    <RetryUntilSuccessful num_attempts="{config.bt.find.retry}">
+      <StrawberryPerception/>
+    </RetryUntilSuccessful>
+  </BehaviorTree>
+</root>
