@@ -1,0 +1,8 @@
+bt:
+  find:
+    retry: 3
+  tree_file: ${hydra:runtime.cwd}/behavior_trees/strawberry_harvest.xml
+  register_node_types:
+  - fake_nodes
+robot: {}
+env: {}

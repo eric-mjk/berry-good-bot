@@ -1,3 +1,7 @@
-tree_file: ${hydra:runtime.cwd}/behavior_trees/strawberry_harvest.xml
-plugins:
-  - strawberry_bt_nodes  # 로드할 so 이름
+# bt/harvest.yaml
+tree_file_path: "/home/wossas/Desktop/strawberry_robotArm/strawberry_ws/src/berry-good-bot/behavior_trees/strawberry_harvest.xml"
+
+
+# 어떤 노드 그룹을 등록할지 결정하는 파라미터.
+# 여기에 "fake_nodes"를 추가하면 run_bt_node에서 FakePerception 등을 등록합니다.
+register_node_types: ["fake_nodes"]

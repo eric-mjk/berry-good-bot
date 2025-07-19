@@ -4,6 +4,6 @@ defaults:
   - robot: fake
   - env: sim
 
-bt:
-  find:
-    retry: 3
+# bt:
+#   find:
+#     retry: 3
