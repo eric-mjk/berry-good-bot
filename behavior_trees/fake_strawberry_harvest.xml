@@ -1,0 +1,13 @@
+<!-- strawberry_harvest.xml Tree 설정!! -->
+<root main_tree_to_execute = "HarvestMain" >
+  <include path="./strawberry_harves_dummy/FindBerry.xml" />
+  <include path="./strawberry_harves_dummy/ApproachBerry.xml" />
+  <include path="./strawberry_harves_dummy/ServoAndCut.xml" />
+  <BehaviorTree ID="HarvestMain">
+    <Sequence name="HarvestSequence">
+      <SubTree ID="FindBerry"/>
+      <SubTree ID="ApproachBerry"/>
+      <SubTree ID="ServoAndCut"/>
+    </Sequence>
+  </BehaviorTree>
+</root>

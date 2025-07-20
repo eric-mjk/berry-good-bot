@@ -1,5 +1,5 @@
 # bt/harvest.yaml
-tree_file_path: "/home/wossas/Desktop/strawberry_robotArm/strawberry_ws/src/berry-good-bot/behavior_trees/strawberry_harvest.xml"
+tree_file_path: "/home/wossas/Desktop/strawberry_robotArm/strawberry_ws/src/berry-good-bot/behavior_trees/fake_strawberry_harvest.xml"
 
 
 # 어떤 노드 그룹을 등록할지 결정하는 파라미터.

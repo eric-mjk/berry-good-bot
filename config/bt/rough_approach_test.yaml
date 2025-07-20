@@ -1,0 +1,6 @@
+# config/bt/rough_approach_test.yaml
+tree_file_path: "/home/wossas/Desktop/strawberry_robotArm/strawberry_ws/src/berry-good-bot/behavior_trees/RoughAproach_test.xml"
+
+# 어떤 노드 그룹을 등록할지 결정하는 파라미터.
+# 여기에 "rough_approach_nodes"를 추가하면 run_bt_node에서 실제 MoveIt! 노드를 등록합니다.
+register_node_types: ["rough_approach_nodes"]

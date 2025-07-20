@@ -1,0 +1,9 @@
+<root main_tree_to_execute = "RoughApproachTestMain" >
+  <BehaviorTree ID="RoughApproachTestMain">
+    <Sequence name="RoughApproachSequence">
+      <TestPerception target_pose="{goal_pose}"/>
+      <PerceptionVisualizer target_pose="{goal_pose}"/>
+      <RoughApproach target_pose="{goal_pose}"/>
+    </Sequence>
+  </BehaviorTree>
+</root>

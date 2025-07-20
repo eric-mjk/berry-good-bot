@@ -1,5 +1,0 @@
-<root BTCPP_format="4">
-  <BehaviorTree ID="ServoAndCut">
-    <ServoAndCut/>
-  </BehaviorTree>
-</root>

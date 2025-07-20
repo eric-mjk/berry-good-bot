@@ -7,6 +7,11 @@
 // 직접 포함할 노드 헤더 파일
 // strawberry_task_planner의 include/strawberry_bt_nodes/ 디렉토리에서 가져옵니다.
 #include "strawberry_task_planner/fake_nodes.hpp" 
+#include "strawberry_task_planner/rough_approach_nodes.hpp" // 새로 추가할 노드
+
+namespace strawberry_bt_nodes {
+  rclcpp::Node::SharedPtr g_ros_node;
+}
 
 int main(int argc, char **argv)
 {
@@ -14,6 +19,20 @@ int main(int argc, char **argv)
     rclcpp::NodeOptions opts;
     auto node = std::make_shared<rclcpp::Node>("task_planner", opts);
 
+
+    // --- 핵심 수정: 정적 ROS 노드 포인터 초기화 ---
+    // 모든 Behavior Tree 노드들이 이 'node'를 공유하게 됩니다.
+    strawberry_bt_nodes::g_ros_node = node;
+
+    // IMPORTANT: Create a MultiThreadedExecutor to handle MoveIt's internal callbacks
+    // MoveIt 2 typically requires a multi-threaded executor to function correctly,
+    // as it subscribes to various topics and services.
+    rclcpp::executors::MultiThreadedExecutor executor;
+    executor.add_node(node);
+    // Start a separate thread to spin the executor
+    std::thread spinner_thread([&executor]() {
+        executor.spin();
+    });
 
     // 2) BT XML 파일 경로 파라미터
     // 파라미터로 넘어오는 값이 이제 완전한 절대 경로입니다.
@@ -36,23 +55,23 @@ int main(int argc, char **argv)
     std::vector<std::string> node_types_to_register = node->declare_parameter<std::vector<std::string>>("register_node_types", std::vector<std::string>());
 
     // "fake_nodes" 그룹이 등록될 목록에 있다면, 해당 노드들을 등록
-    bool register_fake_nodes = false;
     for (const std::string& type_name : node_types_to_register) {
         if (type_name == "fake_nodes") {
-            register_fake_nodes = true;
-            break;
+            RCLCPP_INFO(node->get_logger(), "Registering Fake Nodes (StrawberryPerception, RoughApproach, ServoAndCut)");
+            factory.registerNodeType<FakePerception>("fake_StrawberryPerception");
+            factory.registerNodeType<FakeApproach>("fake_RoughApproach");
+            factory.registerNodeType<FakeServoCut>("fake_ServoAndCut");
+        } else if (type_name == "rough_approach_nodes") {
+
+            RCLCPP_INFO(node->get_logger(), "Registering Rough Approach Nodes (TestPerception, PerceptionVisualizer, RoughApproach)");
+            factory.registerNodeType<strawberry_bt_nodes::TestPerception>("TestPerception");
+            factory.registerNodeType<strawberry_bt_nodes::PerceptionVisualizer>("PerceptionVisualizer");
+            factory.registerNodeType<strawberry_bt_nodes::RoughApproach>("RoughApproach");
+
+        } else {
+                RCLCPP_WARN(node->get_logger(), "Unknown node type group '%s' in 'register_node_types' parameter. Skipping.", type_name.c_str());
+            }
         }
-    }
-
-    if (register_fake_nodes) {
-        RCLCPP_INFO(node->get_logger(), "Registering Fake Nodes (StrawberryPerception, RoughApproach, ServoAndCut)");
-        factory.registerNodeType<FakePerception>("StrawberryPerception");
-        factory.registerNodeType<FakeApproach>("RoughApproach");
-        factory.registerNodeType<FakeServoCut>("ServoAndCut");
-    } else {
-        RCLCPP_WARN(node->get_logger(), "Skipping registration of Fake Nodes based on 'register_node_types' parameter.");
-    }
-
     
     // 4) 트리 생성 - 넘어온 절대 경로를 그대로 사용합니다.
     auto tree = factory.createTreeFromFile(xml_file_absolute_path);

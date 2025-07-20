@@ -18,6 +18,12 @@ find_package(behaviortree_cpp_v3 REQUIRED)
 
 find_package(ament_index_cpp REQUIRED) # 추가
 
+find_package(moveit_ros_planning_interface REQUIRED)
+find_package(moveit_visual_tools REQUIRED)
+find_package(tf2_geometry_msgs REQUIRED) # For tf2::doTransform or general pose conversion
+
+find_package(geometry_msgs REQUIRED)
+
 
 # 모든 실행 파일이 사용할 의존성 목록을 정의합니다. (ros2_bt_tut 스타일)
 set(dependencies
@@ -26,6 +32,9 @@ set(dependencies
   std_msgs
   behaviortree_cpp_v3
   ament_index_cpp
+  moveit_ros_planning_interface
+  moveit_visual_tools
+  Eigen3
 )
 
 # --- 이 부분이 중요합니다! ---
