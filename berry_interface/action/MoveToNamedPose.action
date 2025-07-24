@@ -1,0 +1,7 @@
+# Goal
+string pose_name          # named_poses.yaml의 key
+---
+bool success
+string message
+---
+float32 progress

@@ -1,0 +1,7 @@
+# Goal
+float32 duration         # servoing을 수행할 시간(s)
+---
+bool success
+string message
+---
+float32 elapsed

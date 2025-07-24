@@ -1,0 +1,19 @@
+moveit_servo:
+  planning_group_name: manipulator        # SRDF 그룹명
+  ee_frame_name: tool0                    # EEF 링크
+  robot_link_command_frame: tool0
+
+  command_in_type: speed_units            # Twist [m/s, rad/s]
+  publish_period: 0.01                    # 100 Hz 제어 루프
+
+  scale:
+    linear: 0.25                          # 최대 선속도 0.25 m/s
+    rotational: 0.6                       # 최대 각속도 0.6 rad/s
+    joint: 0.01                           # joint_space 모드 스텝(미사용)
+
+  low_pass_filter_coeff: 2.0
+  outgoing_command_limits:
+    hard_stop_singularity_threshold: 0.06
+    lower_singularity_threshold: 0.12
+
+  check_collisions: false                 # 시뮬 시작 시 false 추천
