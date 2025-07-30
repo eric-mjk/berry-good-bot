@@ -1,3 +1,4 @@
-# berry_kinematics_control/config/named_poses.yaml
-home: [0.0, 0.0, 0.0, 0.0, 0.0]   # 관절 수(5) 맞춰 수정
+# berry_kinematics_control/config/sample_robot/named_poses.yaml
+home: [0.0, 0.0, 1.57, 1.57, 0.0]   # 관절 수(5) 맞춰 수정
 ready: [0.0, -1.57, 1.57, 0.0, 0.0]
+basket: [0.3, 0.0, 1.57, 0.0, 0.0]

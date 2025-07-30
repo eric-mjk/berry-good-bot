@@ -8,9 +8,15 @@ def send_named(node, pose):
     ac = ActionClient(node, MoveToNamedPose, "move_to_named_pose")
     ac.wait_for_server()
     goal = MoveToNamedPose.Goal(pose_name=pose)
-    fut = ac.send_goal_async(goal)
-    rclpy.spin_until_future_complete(node, fut)
-    print("NamedPose result:", fut.result().result)
+    # fut = ac.send_goal_async(goal)
+    # rclpy.spin_until_future_complete(node, fut)
+    # print("NamedPose result:", fut.result().result)
+    gh_fut = ac.send_goal_async(goal)                 # ① GoalHandle future
+    rclpy.spin_until_future_complete(node, gh_fut)
+    gh     = gh_fut.result()
+    res_fut = gh.get_result_async()                   # ② Result future
+    rclpy.spin_until_future_complete(node, res_fut)
+    print("NamedPose result:", res_fut.result().result)
 
 def send_pose(node, xyzrpy):
     ac = ActionClient(node, MoveToPose, "move_to_pose")
@@ -23,9 +29,16 @@ def send_pose(node, xyzrpy):
     pose.pose.orientation.w, pose.pose.orientation.x, \
         pose.pose.orientation.y, pose.pose.orientation.z = quat
     goal = MoveToPose.Goal(target_pose=pose)
-    fut = ac.send_goal_async(goal)
-    rclpy.spin_until_future_complete(node, fut)
-    print("MoveToPose result:", fut.result().result)
+    # fut = ac.send_goal_async(goal)
+    # rclpy.spin_until_future_complete(node, fut)
+    # print("MoveToPose result:", fut.result().result)
+    gh_fut = ac.send_goal_async(goal)
+    rclpy.spin_until_future_complete(node, gh_fut)
+    gh     = gh_fut.result()
+    res_fut = gh.get_result_async()
+    rclpy.spin_until_future_complete(node, res_fut)
+    print("MoveToPose result:", res_fut.result().result)
+
 
 def start_servo(node):
     ac = ActionClient(node, ServoTwist, "servo_twist")
@@ -68,3 +81,21 @@ def main():
         start_servo(node)
 
     rclpy.shutdown()
+
+
+# 사용법
+# 1) Named Pose 보내기
+#    사용법: named <pose_name>
+#    예시: "home", "ready", "basket" 등의 YAML에 정의된 포즈 이름을 넣어주세요.
+# ros2 run berry_kinematics_control debug_cli named home
+
+# 2) 임의의 Cartesian 목표 자세 보내기
+#    사용법: pose X Y Z ROLL PITCH YAW
+#    (단위: X,Y,Z[m], ROLL/PITCH/YAW[rad])
+#    예시: (0.1, 0.0, 0.2) 위치, (0, π/2, 0) 자세
+# ros2 run berry_kinematics_control debug_cli pose 0.1 0.0 0.2 0 1.5708 0
+
+# 3) Servo Twist 모드 시작
+#    사용법: servo
+#    이후 Ctrl-C 누르면 자동으로 액션 cancel
+# ros2 run berry_kinematics_control debug_cli servo

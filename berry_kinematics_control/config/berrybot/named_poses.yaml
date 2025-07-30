@@ -1,0 +1,4 @@
+# berry_kinematics_control/config/berrybot/named_poses.yaml
+home: [-0.10, 0.61, -2.443, 0.172, 0.0]   # 관절 수(5) 맞춰 수정
+ready: [-0.276, -0.059, -1.571, 0.367, 0.0]
+basket: [-0.083, 0.337, -1.545, -1.020, 0.0]

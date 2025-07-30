@@ -13,10 +13,16 @@ setup(
         # launch 파일 설치
         ('share/' + package_name + '/launch', [
             'launch/control.launch.py',
+            'launch/bringup.launch.py',      # ✅ 새 통합 런치 추가
+            'launch/berry_bringup.launch.py',      # ✅ 새 통합 런치 추가
         ]),
         # (선택) config 파일 설치
         ('share/' + package_name + '/config/sample_robot', [
             'config/sample_robot/named_poses.yaml',
+        ]),
+        # (선택) config 파일 설치
+        ('share/' + package_name + '/config/berrybot', [
+            'config/berrybot/named_poses.yaml',
         ]),
     ],
     install_requires=['setuptools'],

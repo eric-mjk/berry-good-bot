@@ -22,6 +22,9 @@ import pathlib, numpy as np
 
 # pip install "scipy<1.12" --upgrade    # 1.11.4가 내려올 것
 # pip install xacro
+# echo 'export QT_QPA_PLATFORM=xcb' >> ~/.bashrc
+# source ~/.bashrc
+
 
 # 이 명령어로 설치하면 됌.
 
@@ -35,6 +38,7 @@ import pathlib
 
 def build_models(urdf_path: str):
     """URDF → (RTB_Robot, IKPy_Chain, joint_names)"""
+    print("urdf_path : ", urdf_path)
     if urdf_path.endswith('.xacro'):
         # 1) xacro 처리 → 순수 URDF XML 문자열 얻기
         doc      = xacro.process_file(urdf_path)
@@ -74,7 +78,14 @@ def build_models(urdf_path: str):
     rtb_robot = Robot.URDF(path_for_load)
     ik_chain  = Chain.from_urdf_file(path_for_load)
 
-    joints    = [j.name for j in rtb_robot.q]
+    # joints    = [lnk.name for lnk in rtb_robot.links if lnk.isjoint]
+    # 🔹 URDF에서 **joint** 이름 직접 추출
+    import xml.etree.ElementTree as ET
+    root = ET.parse(path_for_load).getroot()
+    joints = [j.attrib["name"]                          # joint 이름
+              for j in root.findall(".//joint")
+              if j.attrib.get("type") != "fixed"]       # 고정관절 제외
+
 
     return rtb_robot, ik_chain, joints
 

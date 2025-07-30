@@ -1,0 +1,337 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- This URDF was automatically created by SolidWorks to URDF Exporter! Originally created by Stephen Brawner (brawner@gmail.com) 
+     Commit Version: 1.6.0-4-g7f85cfe  Build Version: 1.6.7995.38578
+     For more information, please see http://wiki.ros.org/sw_urdf_exporter -->
+<robot
+  name="berrybot">
+  <link
+    name="base_link">
+    <inertial>
+      <origin
+        xyz="-0.0260796634761501 -0.0365555163799671 0.396735421162825"
+        rpy="0 0 0" />
+      <mass
+        value="2.87702129673757" />
+      <inertia
+        ixx="0.0857296623482647"
+        ixy="4.29743171459672E-05"
+        ixz="-8.56295018331263E-06"
+        iyy="0.0853945250064593"
+        iyz="-2.94665863351021E-06"
+        izz="0.00153624654266533" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://berrybot_description/meshes/base_link.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.792156862745098 0.819607843137255 0.933333333333333 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://berrybot_description/meshes/base_link.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <link
+    name="link1">
+    <inertial>
+      <origin
+        xyz="0.0120728344115199 0.0142112009609397 -0.0329840674201771"
+        rpy="0 0 0" />
+      <mass
+        value="0.641607816803253" />
+      <inertia
+        ixx="0.00176349377389527"
+        ixy="6.23322864568198E-05"
+        ixz="4.24931676487362E-05"
+        iyy="0.00226935278556233"
+        iyz="0.00022001578901826"
+        izz="0.00343231312876168" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://berrybot_description/meshes/link1.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.792156862745098 0.819607843137255 0.933333333333333 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://berrybot_description/meshes/link1.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="joint1"
+    type="prismatic">
+    <origin
+      xyz="-0.0043164 -0.0057205 0.3368"
+      rpy="0 0 0" />
+    <parent
+      link="base_link" />
+    <child
+      link="link1" />
+    <axis
+      xyz="0 0 -1" />
+    <limit
+      lower="-0.445"
+      upper="-0.01"
+      effort="300"
+      velocity="0.02" />
+  </joint>
+  <link
+    name="link2">
+    <inertial>
+      <origin
+        xyz="0.132648108588069 -7.66258727355126E-06 -0.0337313487070523"
+        rpy="0 0 0" />
+      <mass
+        value="1.21790808347326" />
+      <inertia
+        ixx="0.00154846196743339"
+        ixy="-1.54219095761203E-07"
+        ixz="-1.90382758622812E-05"
+        iyy="0.00425206110802368"
+        iyz="6.02386696555079E-08"
+        izz="0.00545645010060873" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://berrybot_description/meshes/link2.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.792156862745098 0.819607843137255 0.933333333333333 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://berrybot_description/meshes/link2.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="joint2"
+    type="revolute">
+    <origin
+      xyz="0.0638586161135005 0 -0.07355"
+      rpy="0 0 0" />
+    <parent
+      link="link1" />
+    <child
+      link="link2" />
+    <axis
+      xyz="0 0 -1" />
+    <limit
+      lower="-1.92"
+      upper="0.611"
+      effort="200"
+      velocity="3" />
+  </joint>
+  <link
+    name="link3">
+    <inertial>
+      <origin
+        xyz="0.0546872133827593 -2.39582301345131E-07 -0.0388851599914216"
+        rpy="0 0 0" />
+      <mass
+        value="0.783047855038987" />
+      <inertia
+        ixx="0.0010727699197224"
+        ixy="-1.53993150086213E-07"
+        ixz="-2.11974954258733E-05"
+        iyy="0.00325810821857342"
+        iyz="-3.42858217553346E-08"
+        izz="0.00389666351584499" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://berrybot_description/meshes/link3.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.792156862745098 0.819607843137255 0.933333333333333 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://berrybot_description/meshes/link3.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="joint3"
+    type="revolute">
+    <origin
+      xyz="0.299 0 -0.079"
+      rpy="0 0 0" />
+    <parent
+      link="link2" />
+    <child
+      link="link3" />
+    <axis
+      xyz="0 0 -1" />
+    <limit
+      lower="-2.443"
+      upper="2.443"
+      effort="200"
+      velocity="3" />
+  </joint>
+  <link
+    name="link4">
+    <inertial>
+      <origin
+        xyz="0.0628613382563859 0.000167411794933691 0.00149049884660379"
+        rpy="0 0 0" />
+      <mass
+        value="0.651212854430719" />
+      <inertia
+        ixx="0.00102423931258213"
+        ixy="-6.24775124143484E-07"
+        ixz="-0.000157050299577248"
+        iyy="0.00105611984337837"
+        iyz="3.71821724595456E-08"
+        izz="0.00139084360081601" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://berrybot_description/meshes/link4.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.792156862745098 0.819607843137255 0.933333333333333 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://berrybot_description/meshes/link4.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="joint4"
+    type="revolute">
+    <origin
+      xyz="0.1306413838865 0 -0.08945"
+      rpy="0 0 0" />
+    <parent
+      link="link3" />
+    <child
+      link="link4" />
+    <axis
+      xyz="0 0 1" />
+    <limit
+      lower="-1.51"
+      upper="1.51"
+      effort="200"
+      velocity="3" />
+  </joint>
+  <link
+    name="link5">
+    <inertial>
+      <origin
+        xyz="0.00045711 -0.0025199 0.02899"
+        rpy="0 0 0" />
+      <mass
+        value="0.17785" />
+      <inertia
+        ixx="7.2572E-05"
+        ixy="-4.8839E-07"
+        ixz="-5.9379E-08"
+        iyy="8.4772E-05"
+        iyz="-2.6021E-07"
+        izz="0.00011467" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://berrybot_description/meshes/link5.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.79216 0.81961 0.93333 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://berrybot_description/meshes/link5.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="joint5"
+    type="revolute">
+    <origin
+      xyz="0.1397 0 0.0257499999999998"
+      rpy="1.5707963267949 0 1.5707963267949" />
+    <parent
+      link="link4" />
+    <child
+      link="link5" />
+    <axis
+      xyz="0 0 1" />
+    <limit
+      lower="-3.142"
+      upper="3.142"
+      effort="200"
+      velocity="3" />
+  </joint>
+</robot>

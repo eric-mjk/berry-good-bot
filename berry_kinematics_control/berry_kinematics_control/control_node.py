@@ -14,8 +14,10 @@ class BerryControl(Node):
         super().__init__("berry_control")
 
         # ---------------- 파라미터 ----------------
-        self.declare_parameter("urdf_path")
-        self.declare_parameter("pose_yaml")
+        # self.declare_parameter("urdf_path")
+        # self.declare_parameter("pose_yaml")
+        self.declare_parameter("urdf_path", "")
+        self.declare_parameter("pose_yaml", "")
         urdf_path  = self.get_parameter("urdf_path").get_parameter_value().string_value
         pose_yaml  = self.get_parameter("pose_yaml").get_parameter_value().string_value
 
@@ -28,6 +30,10 @@ class BerryControl(Node):
         self.js_pub = self.create_publisher(JointState, "/joint_states", 10)
         self.joint_state_msg = JointState(name=self.joint_names)
 
+        # 🔹 최초 1회 & 주기적으로 현재 값 송신 -----------------------
+        self.publish_joint_state()               # 한 번 찍고
+        self.idle_timer = self.create_timer(0.05,  # 20 Hz
+                                            self.publish_joint_state)
         # 액션 서버 3종
         self.named_srv = ActionServer(
             self, MoveToNamedPose, "move_to_named_pose",
@@ -55,6 +61,7 @@ class BerryControl(Node):
         self.joint_state_msg.header.stamp = self.get_clock().now().to_msg()
         self.joint_state_msg.position = self.current_q.tolist()
         self.js_pub.publish(self.joint_state_msg)
+        self.get_logger().debug(f"publish_joint_state → q = {np.round(self.current_q,3).tolist()}")
 
     # ---------- Twist 콜백 ----------
     def twist_cb(self, msg: Twist):
@@ -65,19 +72,29 @@ class BerryControl(Node):
     # ---------- NamedPose ----------
     async def exec_named(self, goal_handle):
         pose_name = goal_handle.request.pose_name
+
+        self.get_logger().info(f"[exec_named] 요청받음 → `{pose_name}`")
         if pose_name not in self.named_poses:
             goal_handle.abort()
             return MoveToNamedPose.Result(success=False,
                                           message="Unknown pose",
                                           )
 
+        # target_q = np.asarray(self.named_poses[pose_name], dtype=float)
         target_q = np.asarray(self.named_poses[pose_name], dtype=float)
+        # YAML 관절 개수가 실제보다 적으면 나머지는 현재 값 유지
+        if target_q.size < self.n_joints:
+            pad = self.current_q[target_q.size : self.n_joints]
+            target_q = np.concatenate([target_q, pad])
+        # 많으면 잘라내기
+        elif target_q.size > self.n_joints:
+            target_q = target_q[: self.n_joints]
         for i, q in enumerate(lspb_interpolate(self.current_q, target_q, 100)):
             self.current_q = q
             self.publish_joint_state()
             fb = MoveToNamedPose.Feedback(progress=i/100.0)
             goal_handle.publish_feedback(fb)
-            await rclpy.sleep(0.01)
+            time.sleep(0.1)                 # 10 ms 블로킹 (멀티스레드 Executor라 OK)
 
         goal_handle.succeed()
         return MoveToNamedPose.Result(success=True, message="Reached")
@@ -85,25 +102,55 @@ class BerryControl(Node):
     # ---------- MoveToPose ----------
     async def exec_pose(self, goal_handle):
         target = goal_handle.request.target_pose
+
+        self.get_logger().info(f"[exec_pose] 요청받음 → pos=({target.pose.position.x:.3f},"
+                               f"{target.pose.position.y:.3f},{target.pose.position.z:.3f}), "
+                               "ori=(%.2f,%.2f,%.2f,%.2f)" % (
+                                 target.pose.orientation.w,
+                                 target.pose.orientation.x,
+                                 target.pose.orientation.y,
+                                 target.pose.orientation.z))
+
         T = self.pose_to_matrix(target)
-        ik_sol = self.ik_chain.inverse_kinematics(T, initial_position=np.r_[self.current_q, 0.0])
-        target_q = np.asarray(ik_sol[:-1])  # IKPy appends dummy joint
+        # ik_sol = self.ik_chain.inverse_kinematics(T, initial_position=np.r_[self.current_q, 0.0])
+        
+        # ─── 여기가 핵심 ───
+        # IKPy 체인이 기대하는 길이만큼 0으로 패딩한 뒤
+        # 앞쪽 self.n_joints 칸에 current_q를 채웁니다.
+        mask     = self.ik_chain.active_links_mask     # 길이 8
+        init_q   = np.zeros(len(mask))                 # ✅ 8
+        self.get_logger().info(f"[exec_pose] len(mask) → ({len(mask)}")
+
+        j = 0
+        for i, active in enumerate(mask):
+            if active:
+                init_q[i] = self.current_q[j]
+                j += 1
+
+        ik_sol = self.ik_chain.inverse_kinematics_frame(
+            T,
+            initial_position=init_q)
+
+        # ② 베이스(0)·툴0(마지막) 제외 → 딱 6칸
+        # target_q = np.asarray(ik_sol[1 : 1 + self.n_joints])
+        target_q = np.asarray(ik_sol[ mask ])          # 길이 6
 
         for i, q in enumerate(lspb_interpolate(self.current_q, target_q, 150)):
             self.current_q = q
             self.publish_joint_state()
             fb = MoveToPose.Feedback(progress=i/150.0)
             goal_handle.publish_feedback(fb)
-            await rclpy.sleep(0.01)
+            time.sleep(0.01)
 
         goal_handle.succeed()
         return MoveToPose.Result(success=True, message="Reached")
 
     # ---------- ServoTwist ----------
     async def exec_servo(self, goal_handle):
+        self.get_logger().info("[exec_servo] mode 시작")
         self.servo_active = True
         while self.servo_active and rclpy.ok():
-            await rclpy.sleep(0.1)
+            time.sleep(0.1)        # 100 ms 정도 간격으로 취소 요청 확인
         goal_handle.succeed()
         return ServoTwist.Result(success=True, message="Servo stopped")
 
@@ -128,6 +175,20 @@ class BerryControl(Node):
         return T
 
 def main():
+    # rclpy.init()
+    # node = BerryControl()
+    # rclpy.spin(node)
+
+    import rclpy.executors as execs
+
     rclpy.init()
     node = BerryControl()
-    rclpy.spin(node)
+
+    executor = execs.MultiThreadedExecutor(num_threads=4)   # 🔹 멀티스레드
+    executor.add_node(node)
+
+    try:
+        executor.spin()
+    finally:
+        node.destroy_node()
+        rclpy.shutdown()
