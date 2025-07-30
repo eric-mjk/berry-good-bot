@@ -76,8 +76,7 @@ def build_models(urdf_path: str):
 
     # 5) RTB & IKPy 모두 파일 경로로 로드
     rtb_robot = Robot.URDF(path_for_load)
-    ik_chain  = Chain.from_urdf_file(path_for_load)
-
+    # ik_chain  = Chain.from_urdf_file(path_for_load)
     # joints    = [lnk.name for lnk in rtb_robot.links if lnk.isjoint]
     # 🔹 URDF에서 **joint** 이름 직접 추출
     import xml.etree.ElementTree as ET
@@ -85,6 +84,17 @@ def build_models(urdf_path: str):
     joints = [j.attrib["name"]                          # joint 이름
               for j in root.findall(".//joint")
               if j.attrib.get("type") != "fixed"]       # 고정관절 제외
+
+    # ── IKPy 체인 ──────────────────────────────────────────────
+    #   ① origin(link0)은 고정(False)
+    #   ② 그 뒤 실제 관절 수(joints)만큼 True
+    active_mask = [False] + [True] * len(joints)        # ex) [F, T, T, …]
+    print("active_mask : ", active_mask)
+
+    ik_chain  = Chain.from_urdf_file(
+        path_for_load,
+        active_links_mask=active_mask                   # ✅ 명시
+    )
 
 
     return rtb_robot, ik_chain, joints

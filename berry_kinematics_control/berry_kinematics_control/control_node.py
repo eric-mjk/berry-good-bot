@@ -24,7 +24,20 @@ class BerryControl(Node):
         self.robot, self.ik_chain, self.joint_names = build_models(urdf_path)
         self.named_poses = load_named_poses(pose_yaml)
         self.n_joints = len(self.joint_names)
-        self.current_q = np.zeros(self.n_joints)
+        # self.current_q = np.zeros(self.n_joints)
+
+        self.n_joints = len(self.joint_names)
+
+        # ① YAML 에 home 이 있으면 그 값을 첫 상태로 사용
+        if "home" in self.named_poses:
+            home = np.asarray(self.named_poses["home"], dtype=float)
+            self.current_q = np.pad(home, (0, self.n_joints - len(home)), "constant")
+        else:
+            self.current_q = np.zeros(self.n_joints)   # fallback
+
+        # ── 관절 한계 (origin 제외) ─────────────────────────
+        self.q_bounds = np.array([lnk.bounds            # shape = (n, 2)
+                                  for lnk in self.ik_chain.links[1:]])
 
         # joint_state 퍼블리셔
         self.js_pub = self.create_publisher(JointState, "/joint_states", 10)
@@ -111,29 +124,55 @@ class BerryControl(Node):
                                  target.pose.orientation.y,
                                  target.pose.orientation.z))
 
-        T = self.pose_to_matrix(target)
-        # ik_sol = self.ik_chain.inverse_kinematics(T, initial_position=np.r_[self.current_q, 0.0])
+        # T = self.pose_to_matrix(target)
+        # # ik_sol = self.ik_chain.inverse_kinematics(T, initial_position=np.r_[self.current_q, 0.0])
         
-        # ─── 여기가 핵심 ───
-        # IKPy 체인이 기대하는 길이만큼 0으로 패딩한 뒤
-        # 앞쪽 self.n_joints 칸에 current_q를 채웁니다.
-        mask     = self.ik_chain.active_links_mask     # 길이 8
-        init_q   = np.zeros(len(mask))                 # ✅ 8
-        self.get_logger().info(f"[exec_pose] len(mask) → ({len(mask)}")
+        # # ─── 여기가 핵심 ───
+        # # IKPy 체인이 기대하는 길이만큼 0으로 패딩한 뒤
+        # # 앞쪽 self.n_joints 칸에 current_q를 채웁니다.
+        # mask     = self.ik_chain.active_links_mask     # 길이 8
+        # init_q   = np.zeros(len(mask))                 # ✅ 8
+        # self.get_logger().info(f"[exec_pose] len(mask) → ({len(mask)}")
 
-        j = 0
+        # j = 0
+        # for i, active in enumerate(mask):
+        #     if active:
+        #         init_q[i] = self.current_q[j]
+        #         j += 1
+
+        # ik_sol = self.ik_chain.inverse_kinematics_frame(
+        #     T,
+        #     initial_position=init_q)
+
+        # # ② 베이스(0)·툴0(마지막) 제외 → 딱 6칸
+        # # target_q = np.asarray(ik_sol[1 : 1 + self.n_joints])
+        # target_q = np.asarray(ik_sol[ mask ])          # 길이 6
+        T = self.pose_to_matrix(target)                 # 4×4 목표 frame
+
+        mask   = self.ik_chain.active_links_mask        # [False, True…]
+        init_q = np.zeros(len(mask))                    # 패딩용 벡터
+
+        # 현재 관절값을 active 슬롯에만 복사
+        act_i = 0
         for i, active in enumerate(mask):
             if active:
-                init_q[i] = self.current_q[j]
-                j += 1
+                init_q[i] = self.current_q[act_i]
+                act_i    += 1
+
+        # IKPy : frame → joint
+        # ik_sol = self.ik_chain.inverse_kinematics_frame(
+        #     T, initial_position=init_q)
+
+        # IKPy : frame → joint
+        #   초기값이 joint limit 밖이면 SciPy 가 ValueError 를 던짐
+        bounds = np.array([lnk.bounds for lnk in self.ik_chain.links])
+        init_q = np.clip(init_q, bounds[:, 0] + 1e-4, bounds[:, 1] - 1e-4)
 
         ik_sol = self.ik_chain.inverse_kinematics_frame(
-            T,
-            initial_position=init_q)
+            T, initial_position=init_q)
 
-        # ② 베이스(0)·툴0(마지막) 제외 → 딱 6칸
-        # target_q = np.asarray(ik_sol[1 : 1 + self.n_joints])
-        target_q = np.asarray(ik_sol[ mask ])          # 길이 6
+        # origin(0) 제외하고 실제 관절만 추출
+        target_q = np.asarray(ik_sol[1 : 1 + self.n_joints])
 
         for i, q in enumerate(lspb_interpolate(self.current_q, target_q, 150)):
             self.current_q = q
@@ -160,6 +199,14 @@ class BerryControl(Node):
         J = self.robot.jacob0(self.current_q)
         qdot = damped_pinv(J, lam=0.05) @ self.latest_twist
         self.current_q += qdot * 0.004
+
+        # ★ 한계 클리핑 (DLS 초기화와 동일 오프셋) :cite:`turn0search8`
+        eps = 1e-4
+        self.current_q = np.clip(
+            self.current_q,
+            self.q_bounds[:, 0] + eps,
+            self.q_bounds[:, 1] - eps)
+
         self.publish_joint_state()
 
     # ---------- 유틸 ----------
