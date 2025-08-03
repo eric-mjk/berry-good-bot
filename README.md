@@ -1,5 +1,12 @@
 아래 설계는 **“딸기 수확 로봇”** 프로젝트를 **모노-레포 + ROS 2 Humble + MoveIt 2 + ViSP + BehaviorTree.CPP 4 + Hydra** 조합으로 시작할 때 바로 GitHub에 올려도 되는 수준의 **폴더 트리, 패키지 명세, Hydra YAML 구성, CI 워크플로**까지 모두 포함한 **완전한 초기 골격**입니다. 한 단계씩 따라가면 *BT → MoveIt 계획 → ViSP Servo* 순서로 실제 딸기를 딸 수 있는 데모까지 그대로 확장 가능하도록 검증된 문서·튜토리얼만을 근거로 잡았습니다.
 
+python3 -m venv ~/berryRos_venv      # 가상환경 생성
+source ~/berryRos_venv/bin/activate  # 활성화
+python -m pip install -U pip     # pip 최신화
+
+
+
+
 ---
 
 ## 1. 레포 지顶 구조 (colcon workspace = repo)

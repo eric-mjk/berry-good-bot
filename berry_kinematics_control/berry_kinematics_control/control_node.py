@@ -107,7 +107,7 @@ class BerryControl(Node):
             self.publish_joint_state()
             fb = MoveToNamedPose.Feedback(progress=i/100.0)
             goal_handle.publish_feedback(fb)
-            time.sleep(0.1)                 # 10 ms 블로킹 (멀티스레드 Executor라 OK)
+            time.sleep(0.03)                 # 10 ms 블로킹 (멀티스레드 Executor라 OK)
 
         goal_handle.succeed()
         return MoveToNamedPose.Result(success=True, message="Reached")
@@ -179,7 +179,7 @@ class BerryControl(Node):
             self.publish_joint_state()
             fb = MoveToPose.Feedback(progress=i/150.0)
             goal_handle.publish_feedback(fb)
-            time.sleep(0.01)
+            time.sleep(0.03)
 
         goal_handle.succeed()
         return MoveToPose.Result(success=True, message="Reached")

@@ -25,6 +25,23 @@ import pathlib, numpy as np
 # echo 'export QT_QPA_PLATFORM=xcb' >> ~/.bashrc
 # source ~/.bashrc
 
+# # 1) 충돌 날 수 있는 패키지 제거
+# pip uninstall numpy roboticstoolbox-python spatialmath-python matplotlib scipy
+
+# # 2) 호환 버전 재설치  (pip 20.x 에서도 정상 동작)
+# # 1) RTB · SpatialMath · NumPy · SciPy를 한꺼번에 설치
+# sudo pip3 install --upgrade 'numpy<2.0' 'scipy<1.12'
+
+# # 1. NumPy 1.x 버전 설치 (가장 중요!)
+# pip install "numpy<2.0"
+
+# # 2. 나머지 라이브러리들을 지정된 버전으로 설치
+# pip install "roboticstoolbox-python==1.1.0" "spatialmath-python==1.1.8" "matplotlib<3.8" "scipy<1.12"
+
+# # 3. xacro 라이브러리 설치
+# pip install xacro
+
+
 
 # 이 명령어로 설치하면 됌.
 
