@@ -1,6 +1,6 @@
 // ---------- 스텝 모터 핀 정의 ----------
 const int StepX = 2, DirX = 5, LimitX = 9;
-const int StepY = 3, DirY = 6, LimitY = 10;
+const int StepY = 3, DirY = 6, LimitY = 40;
 const int StepZ = 4, DirZ = 7, LimitZ = 11;
 
 // ---------- 스텝 모터 설정 ----------
@@ -10,7 +10,7 @@ const float gearRatioY = 20.0;
 const float gearRatioZ = 5.0;
 
 // ---------- 초기 기준 각도 ----------
-const float initAngleX = 113.4;
+const float initAngleX = -113.4;
 const float initAngleY = -142.5;
 const float initAngleZ = 91.4;
 
@@ -19,7 +19,7 @@ float currentAngleY = initAngleY;
 float currentAngleZ = initAngleZ;
 
 void setup() {
-  Serial.begin(9600);     // 사용자 입력용
+  Serial.begin(115200);     // 사용자 입력용
   Serial1.begin(115200);    // Uno 통신용 (TX1: Pin 18)
 
   // 핀 설정

@@ -14,7 +14,7 @@ const float STEPS_PER_REV = 2415.0;   // 한 회전 스텝
 const float SCREW_LEAD_MM = 4.0;      // 한 회전 이동(mm)
 const float STEPS_PER_MM  = STEPS_PER_REV / SCREW_LEAD_MM;
 
-const float MAX_VEL_STEP_PER_S   = 4000.0;   // ★조정: 최대 속도(스텝/s)
+const float MAX_VEL_STEP_PER_S   = 16000.0;   // ★조정: 최대 속도(스텝/s)
 const float MAX_ACCEL_STEP_PER_S2 = 8000.0;  // ★조정: 최대 가속(스텝/s²)
 
 /* ────── 서보 파라미터 ────── */
@@ -39,6 +39,10 @@ volatile bool  targetGripOpen = false;
 /* ────── 통신 출력 타이머 ────── */
 const unsigned long STATUS_INTERVAL_MS = 100;
 unsigned long lastStatusMs = 0;
+
+/* ────── 수신 버퍼 (비블로킹 파싱용) ────── */
+char recvBuf[32];
+uint8_t recvPos = 0;
 
 /* ───────────────────────────────────────────────────────────── */
 /*                        기본 함수 선언                         */
@@ -88,53 +92,148 @@ void loop() {
 
 /* ───────────────────────────────────────────────────────────── */
 /*                     1) 시리얼 명령 처리                       */
+// void processSerial() {
+//   if (!Serial.available()) return;
+
+//   // String line = Serial.readStringUntil('\n');
+//   // line.trim();
+//   // if (line.length() == 0) return;
+
+//   // // 공백 구분자 세 개 값 기대
+//   // float zMm=0, wDeg=0;
+//   // int   gCmd=0;
+//   // int n = sscanf(line.c_str(), "%f %f %d", &zMm, &wDeg, &gCmd);
+//   // if (n != 3) {
+//   //   Serial.print(F("❌ 잘못된 입력: ")); Serial.println(line); Serial.println(n);
+//   //   return;
+//   // }
+  
+//   String line = Serial.readStringUntil('\n');
+//   line.trim();
+//   if (line.length() == 0) return;
+
+//   // 공백 구분자로 세 개 값 분리
+//   int sep1 = line.indexOf(' ');
+//   int sep2 = line.indexOf(' ', sep1 + 1);
+//   if (sep1 == -1 || sep2 == -1) {
+//     Serial.print(F("❌ 잘못된 입력: "));
+//     Serial.println(line);
+//     return;
+//   }
+//   float zMm = line.substring(0, sep1).toFloat();
+//   float wDeg = line.substring(sep1 + 1, sep2).toFloat();
+//   int   gCmd = line.substring(sep2 + 1).toInt();
+
+//   /* Z 축 범위 체크 */
+//   if (zMm > 0 || zMm < -590) {
+//     Serial.println(F("⚠️ Z 범위(0 ~ -590 mm) 초과"));
+//   } else {
+//     targetStepPos = lround(zMm * STEPS_PER_MM);
+//   }
+
+//   /* 손목 범위 체크 */
+//   if (wDeg < -90 || wDeg > 90) {
+//     Serial.println(F("⚠️ W 범위(-90 ~ 90°) 초과"));
+//   } else {
+//     targetWristDeg = wDeg;
+//   }
+
+//   /* 그리퍼 */
+//   targetGripOpen = (gCmd == 1);
+
+//   // Serial.print(F("🆗 목표 → Z:")); Serial.print(zMm,1);
+//   // Serial.print(F("mm  W:"));      Serial.print(wDeg,0);
+//   // Serial.print(F("°  G:"));       Serial.println(targetGripOpen?1:0);
+// }
+
 void processSerial() {
-  if (!Serial.available()) return;
+  // 시리얼 버퍼에 데이터가 있으면 한 글자씩 읽어 처리
+  while (Serial.available()) {
+    // // ▶ 디버그: 읽은 문자 출력
+    // char dbgChar = Serial.peek();
+    // Serial.print(F("[DBG] Serial.peek(): '"));
+    // Serial.print(dbgChar);
+    // Serial.println(F("'"));
 
-  String line = Serial.readStringUntil('\n');
-  line.trim();
-  if (line.length() == 0) return;
+    char c = Serial.read();
+    // 'a' 문자를 명령 종료자로 사용 (또는 버퍼 풀 시)
+    if (c == 'a' || recvPos >= sizeof(recvBuf) - 1) {
+      recvBuf[recvPos] = '\0';           // 문자열 종료
+      // // ▶ 디버그: 완성된 버퍼 내용 출력
+      // Serial.print(F("[DBG] Complete recvBuf: \""));
+      // Serial.print(recvBuf);
+      // Serial.println(F("\""));
 
-  // 공백 구분자 세 개 값 기대
-  float zMm=0, wDeg=0;
-  int   gCmd=0;
-  int n = sscanf(line.c_str(), "%f %f %d", &zMm, &wDeg, &gCmd);
-  if (n != 3) {
-    Serial.print(F("❌ 잘못된 입력: ")); Serial.println(line);
-    return;
+      // 빈 줄 무시
+      if (recvPos > 0) {
+        // 공백으로 세 토큰 분리
+        // // ▶ 디버그: 토큰 분리 전 원본 버퍼 복사
+        // char tmpBuf[32];
+        // strcpy(tmpBuf, recvBuf);
+        // Serial.print(F("[DBG] Tokenizing tmpBuf: \""));
+        // Serial.print(tmpBuf);
+        // Serial.println(F("\""));
+
+        char *p1 = strtok(recvBuf, " ");
+        char *p2 = strtok(NULL, " ");
+        char *p3 = strtok(NULL, " ");
+        // // ▶ 디버그: 파싱된 토큰 출력
+        // Serial.print(F("[DBG] p1=\"")); Serial.print(p1); Serial.println(F("\""));
+        // Serial.print(F("[DBG] p2=\"")); Serial.print(p2); Serial.println(F("\""));
+        // Serial.print(F("[DBG] p3=\"")); Serial.print(p3); Serial.println(F("\""));
+
+        if (!p1 || !p2 || !p3) {
+          Serial.print(F("❌ 잘못된 입력: "));
+          Serial.println(recvBuf);
+        } else {
+          float zMm = atof(p1);
+          float wDeg = atof(p2);
+          int   gCmd = atoi(p3);
+          // Z 축 범위 체크
+          if (zMm > 0 || zMm < -590) {
+            Serial.println(F("⚠️ Z 범위(0 ~ -590 mm) 초과"));
+          } else {
+            targetStepPos = lround(zMm * STEPS_PER_MM);
+          }
+          // 손목 범위 체크
+          if (wDeg < -90 || wDeg > 90) {
+            Serial.println(F("⚠️ W 범위(-90 ~ 90°) 초과"));
+          } else {
+            targetWristDeg = wDeg;
+          }
+          // 그리퍼
+          targetGripOpen = (gCmd == 1);
+        }
+      }
+      recvPos = 0;                       // 버퍼 리셋
+    } else if (c >= 32 && c != 'a') {   // 'a'는 저장하지 않음
+      // // ▶ 디버그: 버퍼에 추가될 문자 출력
+      // Serial.print(F("[DBG] Appending to recvBuf: '"));
+      // Serial.print(c);
+      // Serial.println(F("'"));
+
+      recvBuf[recvPos++] = c;           // 가시문자만 저장
+    }
+    
   }
-
-  /* Z 축 범위 체크 */
-  if (zMm > 0 || zMm < -590) {
-    Serial.println(F("⚠️ Z 범위(0 ~ -590 mm) 초과"));
-  } else {
-    targetStepPos = lround(zMm * STEPS_PER_MM);
-  }
-
-  /* 손목 범위 체크 */
-  if (wDeg < -90 || wDeg > 90) {
-    Serial.println(F("⚠️ W 범위(-90 ~ 90°) 초과"));
-  } else {
-    targetWristDeg = wDeg;
-  }
-
-  /* 그리퍼 */
-  targetGripOpen = (gCmd == 1);
-
-  Serial.print(F("🆗 목표 → Z:")); Serial.print(zMm,1);
-  Serial.print(F("mm  W:"));      Serial.print(wDeg,0);
-  Serial.print(F("°  G:"));       Serial.println(targetGripOpen?1:0);
 }
 
 /* ───────────────────────────────────────────────────────────── */
 /*                     2) 스텝퍼 업데이트                         */
 void updateStepper() {
   long   delta = targetStepPos - curStepPos;
-  if (delta == 0 && curStepVel == 0) return;          // 정지 상태
+  // if (delta == 0 && curStepVel == 0) return;          // 정지 상태
+  if (delta == 0) {
+    curStepVel = 0;                                  // 완전 정지
+    return;
+  }
 
   /* 이동 방향 & 목표 속도 */
   int dirSign = (delta > 0) ? 1 : -1;
   float desiredVel = dirSign * MAX_VEL_STEP_PER_S;
+  // Serial.print(targetStepPos);
+  // Serial.print(curStepPos);
+  // Serial.println(dirSign);
 
   /* 가속도 제한으로 속도 업데이트 */
   unsigned long nowUs = micros();
@@ -166,7 +265,7 @@ void updateStepper() {
 
   if (nowUs - lastStepTimeUs >= stepIntervalUs) {
     /* 리밋 스위치 보호 */
-    if (digitalRead(LIMIT_PIN) == LOW && dirSign < 0) { // 아래쪽으로 더 가면 안 됨
+    if (digitalRead(LIMIT_PIN) == HIGH && dirSign > 0) { // 아래쪽으로 더 가면 안 됨
       curStepVel = 0;
       targetStepPos = curStepPos;      // 목표도 여기로
       Serial.println(F("⚠️ 리밋 스위치 감지 → Z 정지"));
@@ -244,12 +343,13 @@ void homeAxis() {
   
   /* 스위치에서 10 mm 이탈 */
   digitalWrite(DIR_PIN, LOW);
-  for (long i=0;i< (long)(10*STEPS_PER_MM); i++) {
+  for (long i=0;i< (long)(100*STEPS_PER_MM); i++) {
     digitalWrite(STEP_PIN, HIGH);
     delayMicroseconds(50);
     digitalWrite(STEP_PIN, LOW);
     delayMicroseconds(50);
     curStepPos--;
   }
+  targetStepPos = curStepPos;
   Serial.println(F(">>> Homing 완료"));
 }
