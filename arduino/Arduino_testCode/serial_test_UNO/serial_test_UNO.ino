@@ -1,68 +1,255 @@
+#include <Arduino.h>
 #include <Servo.h>
 
-Servo wristleServo;
-Servo gripperServo;
+/* ────── 하드웨어 핀 ────── */
+#define DIR_PIN     9   // 스텝퍼 DIR
+#define STEP_PIN    6   // 스텝퍼 STEP
+#define LIMIT_PIN   7   // 리밋 스위치 (눌리면 LOW)
 
-// 핀 설정
-const int wristleServoPin = 11;
-const int gripperServoPin = 3;
+const int wristServoPin  = 11;
+const int gripServoPin   = 3;
 
-// 그리퍼 서보 각도 설정
-const int ANGLE_GRIPPER_OPEN   = 150;
-const int ANGLE_GRIPPER_CLOSED = 75;
+/* ────── 스텝퍼 모션 파라미터 ────── */
+const float STEPS_PER_REV = 2415.0;   // 한 회전 스텝
+const float SCREW_LEAD_MM = 4.0;      // 한 회전 이동(mm)
+const float STEPS_PER_MM  = STEPS_PER_REV / SCREW_LEAD_MM;
 
+const float MAX_VEL_STEP_PER_S   = 4000.0;   // ★조정: 최대 속도(스텝/s)
+const float MAX_ACCEL_STEP_PER_S2 = 8000.0;  // ★조정: 최대 가속(스텝/s²)
+
+/* ────── 서보 파라미터 ────── */
+const int  ANGLE_GRIPPER_OPEN   = 150;
+const int  ANGLE_GRIPPER_CLOSED = 75;
+const float MAX_SERVO_DEG_PER_SEC = 180.0;  // ★조정: 서보 속도 한계
+
+/* ────── 런타임 상태 ────── */
+volatile long  curStepPos = 0;   // 절대 위치(스텝)
+volatile long  targetStepPos = 0;
+
+float   curStepVel  = 0;         // 현재 속도(스텝/s)
+unsigned long lastStepTimeUs = 0; // 마지막 스텝 발생 시각
+
+Servo wristServo, gripServo;
+volatile float curWristDeg = 0;      // -90~90°
+volatile float targetWristDeg = 0;
+
+volatile bool  curGripOpen = false;
+volatile bool  targetGripOpen = false;
+
+/* ────── 통신 출력 타이머 ────── */
+const unsigned long STATUS_INTERVAL_MS = 100;
+unsigned long lastStatusMs = 0;
+
+/* ───────────────────────────────────────────────────────────── */
+/*                        기본 함수 선언                         */
+void homeAxis();
+void processSerial();
+void updateStepper();
+void updateServos();
+void sendStatus();
+
+/* ───────────────────────────────────────────────────────────── */
 void setup() {
-  Serial.begin(115200);            // Mega와 통신
+  /* 핀 초기화 */
+  pinMode(DIR_PIN, OUTPUT);
+  pinMode(STEP_PIN, OUTPUT);
+  pinMode(LIMIT_PIN, INPUT_PULLUP);
 
-  wristleServo.attach(wristleServoPin);
-  gripperServo.attach(gripperServoPin);
+  digitalWrite(DIR_PIN, LOW);
+  digitalWrite(STEP_PIN, LOW);
 
-  // 초기 위치
-  wristleServo.write(90);                    // 손목 서보: 중앙(0°)
-  gripperServo.write(ANGLE_GRIPPER_CLOSED);  // 그리퍼 서보: 닫힘(150°)
+  Serial.begin(115200);
+  while (!Serial) {}
 
-  Serial.println(F("UNO 준비 완료! 형식: \"각도(-90~90) 그리퍼_명령(0/1)\" 예) \"30 1\""));
+  /* 서보 초기화 */
+  wristServo.attach(wristServoPin);
+  gripServo.attach(gripServoPin);
+
+  /* Homing */
+  homeAxis();
+
+  /* 초기 서보 위치 */
+  curWristDeg = targetWristDeg = 0;
+  wristServo.write(90);               // 중앙
+  curGripOpen = targetGripOpen = false;
+  gripServo.write(ANGLE_GRIPPER_CLOSED);
+
+  Serial.println(F("\n=== 명령 형식: \"Z_mm W_deg G(0/1)\" ==="));
+  Serial.println(F("   예) -120.0  30  1"));
+  Serial.println(F("----------------------------------------"));
 }
 
 void loop() {
-  if (Serial.available()) {
-    String input = Serial.readStringUntil('\n');
-    input.trim();
+  processSerial();   // (1) 새 명령 수신
+  updateStepper();   // (2) 스텝퍼 한-스텝/가속도 관리
+  updateServos();    // (3) 서보 각도 점진 이동
+  sendStatus();      // (4) 주기적 상태 전송
+}
 
-    // 공백으로 분리
-    int sep = input.indexOf(' ');
-    if (sep == -1) {
-      Serial.print(F("❌ 잘못된 입력: "));
-      Serial.println(input);
+/* ───────────────────────────────────────────────────────────── */
+/*                     1) 시리얼 명령 처리                       */
+void processSerial() {
+  if (!Serial.available()) return;
+
+  String line = Serial.readStringUntil('\n');
+  line.trim();
+  if (line.length() == 0) return;
+
+  // 공백 구분자 세 개 값 기대
+  float zMm=0, wDeg=0;
+  int   gCmd=0;
+  int n = sscanf(line.c_str(), "%f %f %d", &zMm, &wDeg, &gCmd);
+  if (n != 3) {
+    Serial.print(F("❌ 잘못된 입력: ")); Serial.println(line);
+    return;
+  }
+
+  /* Z 축 범위 체크 */
+  if (zMm > 0 || zMm < -590) {
+    Serial.println(F("⚠️ Z 범위(0 ~ -590 mm) 초과"));
+  } else {
+    targetStepPos = lround(zMm * STEPS_PER_MM);
+  }
+
+  /* 손목 범위 체크 */
+  if (wDeg < -90 || wDeg > 90) {
+    Serial.println(F("⚠️ W 범위(-90 ~ 90°) 초과"));
+  } else {
+    targetWristDeg = wDeg;
+  }
+
+  /* 그리퍼 */
+  targetGripOpen = (gCmd == 1);
+
+  Serial.print(F("🆗 목표 → Z:")); Serial.print(zMm,1);
+  Serial.print(F("mm  W:"));      Serial.print(wDeg,0);
+  Serial.print(F("°  G:"));       Serial.println(targetGripOpen?1:0);
+}
+
+/* ───────────────────────────────────────────────────────────── */
+/*                     2) 스텝퍼 업데이트                         */
+void updateStepper() {
+  long   delta = targetStepPos - curStepPos;
+  if (delta == 0 && curStepVel == 0) return;          // 정지 상태
+
+  /* 이동 방향 & 목표 속도 */
+  int dirSign = (delta > 0) ? 1 : -1;
+  float desiredVel = dirSign * MAX_VEL_STEP_PER_S;
+
+  /* 가속도 제한으로 속도 업데이트 */
+  unsigned long nowUs = micros();
+  float dt = (nowUs - lastStepTimeUs) / 1e6;          // s
+  if (dt == 0) dt = 1e-6;
+  if (curStepVel < desiredVel) {
+    curStepVel += MAX_ACCEL_STEP_PER_S2 * dt;
+    if (curStepVel > desiredVel) curStepVel = desiredVel;
+  } else if (curStepVel > desiredVel) {
+    curStepVel -= MAX_ACCEL_STEP_PER_S2 * dt;
+    if (curStepVel < desiredVel) curStepVel = desiredVel;
+  }
+
+  /* 마지막 단계에서 감속(목표까지 남은 거리 대비) */
+  float reqBrakingDist = (curStepVel*curStepVel) / (2*MAX_ACCEL_STEP_PER_S2);
+  if (abs(delta) < reqBrakingDist) {
+    desiredVel = dirSign * sqrt(2 * MAX_ACCEL_STEP_PER_S2 * abs(delta));
+    if (curStepVel > desiredVel)
+      curStepVel -= MAX_ACCEL_STEP_PER_S2 * dt;
+  }
+
+  /* 스텝 펄스 타이밍 계산 */
+  float stepIntervalUsF = 1e6 / abs(curStepVel);
+  static float intervalCarry = 0;  // 소수 누적
+  unsigned long stepIntervalUs = (unsigned long)(stepIntervalUsF + intervalCarry);
+  intervalCarry = (stepIntervalUsF + intervalCarry) - stepIntervalUs; // 잔여
+
+  if (abs(curStepVel) < 1) return;  // 아직 너무 느려 스텝 안찍음
+
+  if (nowUs - lastStepTimeUs >= stepIntervalUs) {
+    /* 리밋 스위치 보호 */
+    if (digitalRead(LIMIT_PIN) == LOW && dirSign < 0) { // 아래쪽으로 더 가면 안 됨
+      curStepVel = 0;
+      targetStepPos = curStepPos;      // 목표도 여기로
+      Serial.println(F("⚠️ 리밋 스위치 감지 → Z 정지"));
       return;
     }
 
-    String angleStr = input.substring(0, sep);
-    String gripCmd  = input.substring(sep + 1);
+    /* DIR 설정 */
+    digitalWrite(DIR_PIN, (dirSign > 0) ? HIGH : LOW);
 
-    /* ---------- 손목 서보 (wristleServo) ---------- */
-    int inputAngle = angleStr.toInt();
-    if (inputAngle < -90 || inputAngle > 90) {
-      Serial.println(F("⚠️ 손목 값은 -90 ~ 90° 사이여야 합니다!"));
-    } else {
-      int mappedAngle = inputAngle + 90;  
-      wristleServo.write(mappedAngle);
-      Serial.print(F("✅ 손목 서보 이동: "));
-      Serial.println(mappedAngle);
-    }
+    /* 펄스 출력 */
+    digitalWrite(STEP_PIN, HIGH);
+    delayMicroseconds(50);
+    digitalWrite(STEP_PIN, LOW);
 
-    /* ---------- 그리퍼 서보 (gripperServo) ---------- */
-    if (gripCmd == "1") {
-      gripperServo.write(ANGLE_GRIPPER_OPEN);
-      Serial.println(F("✅ 그리퍼 열림 (150°)"));
-    } else if (gripCmd == "0") {
-      gripperServo.write(ANGLE_GRIPPER_CLOSED);
-      Serial.println(F("✅ 그리퍼 닫힘 (75°)"));
-    } else {
-      Serial.print(F("⚠️ 그리퍼 명령 오류: "));
-      Serial.println(gripCmd);
-    }
-
-    Serial.println(F("----"));
+    curStepPos += dirSign;
+    lastStepTimeUs = nowUs;
   }
+}
+
+/* ───────────────────────────────────────────────────────────── */
+/*                     3) 서보 업데이트                           */
+void updateServos() {
+  /* 손목 */
+  if (curWristDeg != targetWristDeg) {
+    float dt = (millis() - lastStatusMs) / 1000.0;      // rough loop dt
+    if (dt == 0) dt = 0.001;
+    float step = MAX_SERVO_DEG_PER_SEC * dt;
+    if (abs(targetWristDeg - curWristDeg) < step)
+      curWristDeg = targetWristDeg;
+    else
+      curWristDeg += (targetWristDeg > curWristDeg ? step : -step);
+
+    int servoVal = constrain(lround(curWristDeg + 90), 0, 180);
+    wristServo.write(servoVal);
+  }
+
+  /* 그리퍼 */
+  if (curGripOpen != targetGripOpen) {
+    curGripOpen = targetGripOpen;
+    gripServo.write(curGripOpen ? ANGLE_GRIPPER_OPEN
+                                : ANGLE_GRIPPER_CLOSED);
+  }
+}
+
+/* ───────────────────────────────────────────────────────────── */
+/*                     4) 상태 메시지 전송                        */
+void sendStatus() {
+  unsigned long nowMs = millis();
+  if (nowMs - lastStatusMs < STATUS_INTERVAL_MS) return;
+  lastStatusMs = nowMs;
+
+  float zmm = curStepPos / STEPS_PER_MM;
+  Serial.print(F("POS Z:")); Serial.print(zmm,1);
+  Serial.print(F(" W:"));    Serial.print(curWristDeg,0);
+  Serial.print(F(" G:"));    Serial.println(curGripOpen?1:0);
+}
+
+/* ───────────────────────────────────────────────────────────── */
+/*                         Homing 함수                           */
+void homeAxis() {
+  Serial.println(F(">>> Homing 시작"));
+  digitalWrite(DIR_PIN, HIGH);    // 스위치 방향(위쪽)으로
+  delay(100);
+
+  while (digitalRead(LIMIT_PIN) == LOW) {     // LOW면 아직 미감지
+    digitalWrite(STEP_PIN, HIGH);
+    delayMicroseconds(50);
+    digitalWrite(STEP_PIN, LOW);
+    delayMicroseconds(50);
+  }
+
+  curStepPos = targetStepPos = 0;
+  curStepVel = 0;
+  Serial.println(F(">>> 리밋 스위치 감지 → 원점 설정"));
+  
+  /* 스위치에서 10 mm 이탈 */
+  digitalWrite(DIR_PIN, LOW);
+  for (long i=0;i< (long)(10*STEPS_PER_MM); i++) {
+    digitalWrite(STEP_PIN, HIGH);
+    delayMicroseconds(50);
+    digitalWrite(STEP_PIN, LOW);
+    delayMicroseconds(50);
+    curStepPos--;
+  }
+  Serial.println(F(">>> Homing 완료"));
 }
