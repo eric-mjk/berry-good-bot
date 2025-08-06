@@ -1,6 +1,9 @@
 from setuptools import find_packages, setup
 
-package_name = 'berry_good_bot_control'
+import os
+from glob import glob
+
+package_name = 'berry_serial_bridge'
 
 setup(
     name=package_name,
@@ -10,6 +13,11 @@ setup(
         ('share/ament_index/resource_index/packages',
             ['resource/' + package_name]),
         ('share/' + package_name, ['package.xml']),
+        # ⬇︎ 우리가 만든 리소스들을 설치 경로에 복사
+        (os.path.join('share', package_name, 'launch'),  glob('launch/*.py')),
+        (os.path.join('share', package_name, 'config'),    glob('config/*.yaml')),
+        # (os.path.join('share', package_name, 'meshes'),  glob('meshes/*')),
+        # (os.path.join('share', package_name, 'rviz'),    glob('rviz/*')),
     ],
     install_requires=['setuptools'],
     zip_safe=True,
@@ -20,8 +28,7 @@ setup(
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
-            'control_node = berry_good_bot_control.control_node:main',
-            'debug_node = berry_good_bot_control.debug_node:main',
+            'bridge_node = berry_serial_bridge.bridge_node:main',
         ],
     },
 )

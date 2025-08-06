@@ -1,7 +1,7 @@
 /* ───────────────────── 핀 매핑 ───────────────────── */
 const int StepPin[3]  = {2, 3, 4};
 const int DirPin[3]   = {5, 6, 7};
-const int LimitPin[3] = {9,38,11};      // LOW = 스위치 ON
+const int LimitPin[3] = {9,10,11};      // LOW = 스위치 ON
 
 /* ───────────────── 스텝/기어 파라미터 ─────────────── */
 const int   STEPS_PER_REV = 200;         // 모터 1회전 스텝
@@ -28,7 +28,7 @@ float   stepsPerDeg[3];         // 런타임 계산
 float   curAngle[3];            // 현재 각도(°)
 
 /* ─────── 상태 전송 주기 ─────── */
-const unsigned long STATUS_MS = 100;
+const unsigned long STATUS_MS = 500;
 unsigned long lastStatusMs = 0;
 
 /* ────── 비블로킹 수신 버퍼 ────── */
@@ -70,7 +70,7 @@ void loop(){
   // Serial.println(digitalRead(LimitPin[1]));
   processSerial();
   updateAxes();
-  // sendStatus();
+  sendStatus();
 }
 
 /* ───────────────────────────────────────────────────
@@ -184,13 +184,13 @@ void updateAxes(){
     /* ── 리밋 스위치 한계 보호 ──
        스위치가 LOW(눌림)이고, 지금 가려는 방향이
        해당 축의 “스위치 쪽” 방향과 같으면 정지 */
-      if ( digitalRead(LimitPin[i]) == HIGH &&
-           dirSign == limitDirSign[i] )
-      {
-        axes[i].curVelSteps = 0;
-        axes[i].targetSteps = axes[i].curSteps;
-        continue;
-      }
+      // if ( digitalRead(LimitPin[i]) == HIGH &&
+      //      dirSign == limitDirSign[i] )
+      // {
+      //   axes[i].curVelSteps = 0;
+      //   axes[i].targetSteps = axes[i].curSteps;
+      //   continue;
+      // }
       digitalWrite(DirPin[i], dirSign>0?HIGH:LOW);
       digitalWrite(StepPin[i],HIGH);
       delayMicroseconds(5);
@@ -257,13 +257,13 @@ void homeAxis(int idx, bool cw){
 
     if (limit == HIGH) {
         highCount = 0;
-      for(int step=0; step<10; step++){
+      for(int step=0; step<100; step++){
         int limit = digitalRead(LimitPin[idx]);
         Serial.println(limit);
         if(limit==HIGH) highCount++;
-        delayMicroseconds(300000);
+        delayMicroseconds(3000000);
       }
-      if (++highCount >= 10) {
+      if (++highCount >= 100) {
         // 10번 연속 HIGH면 스위치 해제 완료
         Serial.print("스위치 high수 : ");
         Serial.println(highCount);

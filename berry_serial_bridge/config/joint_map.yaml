@@ -1,0 +1,7 @@
+berry_serial_bridge:
+  ros__parameters:
+    joint_cfg.joint1: {board: "UNO",  idx: 0, scale: -1000.0, offset: -600.0}
+    joint_cfg.joint2: {board: "MEGA", idx: 0, scale:  57.295779513, offset: 115.5}
+    joint_cfg.joint3: {board: "MEGA", idx: 1, scale:  -57.295779513, offset: 142.3}
+    joint_cfg.joint4: {board: "MEGA", idx: 2, scale:  57.295779513, offset: -101.5}
+    joint_cfg.joint5: {board: "UNO",  idx: 1, scale:  57.295779513, offset: 0.0}

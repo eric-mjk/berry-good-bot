@@ -37,7 +37,7 @@ volatile bool  curGripOpen = false;
 volatile bool  targetGripOpen = false;
 
 /* ────── 통신 출력 타이머 ────── */
-const unsigned long STATUS_INTERVAL_MS = 100;
+const unsigned long STATUS_INTERVAL_MS = 500;
 unsigned long lastStatusMs = 0;
 
 /* ────── 수신 버퍼 (비블로킹 파싱용) ────── */
