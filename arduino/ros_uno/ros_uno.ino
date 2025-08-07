@@ -17,6 +17,9 @@ const float STEPS_PER_MM  = STEPS_PER_REV / SCREW_LEAD_MM;
 const float MAX_VEL_STEP_PER_S   = 160000.0;   // ★조정: 최대 속도(스텝/s)
 const float MAX_ACCEL_STEP_PER_S2 = 80000.0;  // ★조정: 최대 가속(스텝/s²)
 
+/* ────── 루프당 최대 스텝 수 ────── */
+volatile uint8_t maxStepsPerLoop = 4;   // ★조정: updateStepper() 1회 호출 시 최대 스텝 펄스 수
+
 /* ────── 서보 파라미터 ────── */
 const int  ANGLE_GRIPPER_OPEN   = 150;
 const int  ANGLE_GRIPPER_CLOSED = 75;
@@ -263,26 +266,56 @@ void updateStepper() {
 
   if (abs(curStepVel) < 1) return;  // 아직 너무 느려 스텝 안찍음
 
-  if (nowUs - lastStepTimeUs >= stepIntervalUs) {
+  // if (nowUs - lastStepTimeUs >= stepIntervalUs) {
+  //   /* 리밋 스위치 보호 */
+  //   if (digitalRead(LIMIT_PIN) == HIGH && dirSign > 0) { // 아래쪽으로 더 가면 안 됨
+  //     curStepVel = 0;
+  //     targetStepPos = curStepPos;      // 목표도 여기로
+  //     Serial.println(F("⚠️ 리밋 스위치 감지 → Z 정지"));
+  //     return;
+  //   }
+
+  //   /* DIR 설정 */
+  //   digitalWrite(DIR_PIN, (dirSign > 0) ? HIGH : LOW);
+
+  //   /* 펄스 출력 */
+  //   digitalWrite(STEP_PIN, HIGH);
+  //   delayMicroseconds(50);
+  //   digitalWrite(STEP_PIN, LOW);
+
+  //   curStepPos += dirSign;
+  //   lastStepTimeUs = nowUs;
+  // }
+  /* 한 번의 호출에서 여러 스텝을 처리 */
+  uint8_t stepsMade = 0;
+  while ((nowUs - lastStepTimeUs) >= stepIntervalUs &&
+         stepsMade < maxStepsPerLoop &&
+         curStepPos != targetStepPos) {
+
+    long deltaLoop = targetStepPos - curStepPos;
+    int dirLoop = (deltaLoop > 0) ? 1 : -1;
+
     /* 리밋 스위치 보호 */
-    if (digitalRead(LIMIT_PIN) == HIGH && dirSign > 0) { // 아래쪽으로 더 가면 안 됨
+    if (digitalRead(LIMIT_PIN) == HIGH && dirLoop > 0) { // 아래쪽으로 더 가면 안 됨
       curStepVel = 0;
       targetStepPos = curStepPos;      // 목표도 여기로
       Serial.println(F("⚠️ 리밋 스위치 감지 → Z 정지"));
-      return;
+      break;
     }
 
     /* DIR 설정 */
-    digitalWrite(DIR_PIN, (dirSign > 0) ? HIGH : LOW);
+    digitalWrite(DIR_PIN, (dirLoop > 0) ? HIGH : LOW);
 
     /* 펄스 출력 */
     digitalWrite(STEP_PIN, HIGH);
     delayMicroseconds(50);
     digitalWrite(STEP_PIN, LOW);
 
-    curStepPos += dirSign;
-    lastStepTimeUs = nowUs;
+    curStepPos += dirLoop;
+    lastStepTimeUs += stepIntervalUs;   // 다음 스텝 기준 시각
+    stepsMade++;
   }
+
 }
 
 /* ───────────────────────────────────────────────────────────── */
