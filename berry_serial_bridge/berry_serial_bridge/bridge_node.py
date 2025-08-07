@@ -205,6 +205,11 @@ class Bridge(Node):
                                          "/current_joint_states", 10)
         self.timer = self.create_timer(0.1, self._pub_feedback)
 
+        # ◼ 명령 버퍼 + 송신 타이머 (2 Hz)
+        self.latest_uno_cmd  = [0.0, 0.0, 0]
+        self.latest_mega_cmd = [0.0, 0.0, 0.0]
+        self.send_timer = self.create_timer(0.1, self._send_latest_commands)
+
         self.logger.info("🕒  두 보드 Homing 완료 메시지를 기다리는 중...")
         self.logger.info(f"조인트 매핑 파라미터: {self.map}")
 
@@ -222,13 +227,26 @@ class Bridge(Node):
         if line.startswith("POS"):
             # POS Z:-123.4 W:30 G:1
             try:
-                z = float(line.split()[1].split(':')[1])   # mm
-                w = float(line.split()[2].split(':')[1])   # deg
-                self.feedback["joint1"] = z / -1000.0      # mm→m, sign
-                self.feedback["joint5"] = math.radians(w-90)
+                # z = float(line.split()[1].split(':')[1])   # mm
+                # w = float(line.split()[2].split(':')[1])   # deg
+                # self.feedback["joint1"] = z / -1000.0      # mm→m, sign
+                # self.feedback["joint5"] = math.radians(w-90)
+                tokens = line.split()
+                z_mm   = float(tokens[1].split(':')[1])
+                w_deg  = float(tokens[2].split(':')[1])
+                g_mode = int(tokens[3].split(':')[1])
+                raw_map = {0: z_mm, 1: w_deg, 2: g_mode}
+                # invert using joint_cfg parameters
+                for joint, cfg in self.map.items():
+                    if cfg.get('board') == "UNO":
+                        idx = cfg.get('idx')
+                        raw = raw_map.get(idx)
+                        if raw is None: continue
+                        pos = (raw - cfg.get('offset', 0)) / cfg.get('scale', 1)
+                        self.feedback[joint] = pos
             except: pass
             # pygame 표시
-            self.ui.rx_uno = {"Z_mm": round(z,1), "W_deg": round(w,1)}
+            self.ui.rx_uno = {"Z_mm": round(z_mm,1), "W_deg": round(w_deg,1)}
 
     def _mega_rx(self, line:str):
         if "Homing" in line and "done" in line:
@@ -238,14 +256,27 @@ class Bridge(Node):
             self.ui.rx_mega["X/Y/Z"] = "—"
         if line.startswith("POS"):
             try:
-                _, x, y, z = line.split()
-                d = [float(v.split(':')[1]) for v in (x,y,z)]
-                self.feedback["joint2"] = math.radians(-d[0])
-                self.feedback["joint3"] = math.radians( d[1])
-                self.feedback["joint4"] = math.radians( d[2])
+                # _, x, y, z = line.split()
+                # d = [float(v.split(':')[1]) for v in (x,y,z)]
+                # self.feedback["joint2"] = math.radians(-d[0])
+                # self.feedback["joint3"] = math.radians( d[1])
+                # self.feedback["joint4"] = math.radians( d[2])
+                tokens = line.split()
+                x_val = float(tokens[1].split(':')[1])
+                y_val = float(tokens[2].split(':')[1])
+                z_val = float(tokens[3].split(':')[1])
+                raw_map = {0: x_val, 1: y_val, 2: z_val}
+                # invert using joint_cfg parameters
+                for joint, cfg in self.map.items():
+                    if cfg.get('board') == "MEGA":
+                        idx = cfg.get('idx')
+                        raw = raw_map.get(idx)
+                        if raw is None: continue
+                        pos = (raw - cfg.get('offset', 0)) / cfg.get('scale', 1)
+                        self.feedback[joint] = pos
             except: pass
-            self.ui.rx_mega = {"X": round(d[0],1), "Y": round(d[1],1), "Z": round(d[2],1)}
-
+            # self.ui.rx_mega = {"X": round(d[0],1), "Y": round(d[1],1), "Z": round(d[2],1)}
+            self.ui.rx_mega = {"X": round(x_val,1), "Y": round(y_val,1), "Z": round(z_val,1)}
 
     # ── Homing 확인, 사용자 입력 대기 ────────────
     def _check_startable(self):
@@ -286,8 +317,12 @@ class Bridge(Node):
         self.ui.topic_vals = {n: round(p,3) for n,p in name2pos.items()}
 
         self.logger.info(f"명령 변환 → UNO {uno_cmd} | MEGA {mega_cmd}")
-        self.uno.send(f"{uno_cmd[0]:.1f} {uno_cmd[1]:.1f} {int(uno_cmd[2])}a\n")
-        self.mega.send(f"{mega_cmd[0]:.1f} {mega_cmd[1]:.1f} {mega_cmd[2]:.1f}a\n")
+        # self.uno.send(f"{uno_cmd[0]:.1f} {uno_cmd[1]:.1f} {int(uno_cmd[2])}a\n")
+        # self.mega.send(f"{mega_cmd[0]:.1f} {mega_cmd[1]:.1f} {mega_cmd[2]:.1f}a\n")
+
+        # 변환된 명령을 주기송신을 위해 버퍼에 저장
+        self.latest_uno_cmd  = uno_cmd.copy()
+        self.latest_mega_cmd = mega_cmd.copy()
 
     # ── 피드백 발행 ──────────────────────────────
     def _pub_feedback(self):
@@ -298,6 +333,19 @@ class Bridge(Node):
         self.pub.publish(msg)
         self.ui.curr_js = {n: round(p,3) for n,p in zip(msg.name, msg.position)}
         # self.logger.info(f"피드백 퍼블리시: {list(msg.name)}={list(msg.position)}")
+
+    # ── 주기 송신 (2 Hz) ─────────────────────────────
+    def _send_latest_commands(self):
+        """2 Hz로 최신 버퍼 명령을 보드에 전송"""
+        if not self.started: return
+        u = self.latest_uno_cmd
+        m = self.latest_mega_cmd
+        self.logger.info(f"주기 송신 → UNO {u} | MEGA {m}")
+        self.uno.send(f"{u[0]:.1f} {u[1]:.1f} {int(u[2])}a\n")
+        self.mega.send(f"{m[0]:.1f} {m[1]:.1f} {m[2]:.1f}a\n")
+        # UI 갱신
+        self.ui.tx_uno  = u.copy()
+        self.ui.tx_mega = m.copy()
 
     # ── 종료 ────────────────────────────────────
     def destroy_node(self):

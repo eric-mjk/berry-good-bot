@@ -6,16 +6,16 @@ from launch.substitutions import PathJoinSubstitution
 from ament_index_python.packages import get_package_share_directory
 
 def generate_launch_description():
-    pkg_desc = get_package_share_directory('berrybot_description')
+    pkg_kin = get_package_share_directory('berry_kinematics_control')
     pkg_bridge = get_package_share_directory('berry_serial_bridge')
 
-    view_model_launch = PathJoinSubstitution(
-        [pkg_desc, 'launch', 'view_model.launch.py'])
+    kinControl_launch = PathJoinSubstitution(
+        [pkg_kin, 'launch', 'berry_bringup.launch.py'])
 
     return LaunchDescription([
         # 기존 모델 + GUI
         IncludeLaunchDescription(
-            PythonLaunchDescriptionSource(view_model_launch)),
+            PythonLaunchDescriptionSource(kinControl_launch)),
         # 시리얼 브리지
         Node(package='berry_serial_bridge',
              executable='bridge_node',

@@ -67,7 +67,7 @@ class BerryControl(Node):
             Twist, "/eef_twist_cmd", self.twist_cb, 10)
 
         # servo 루프 타이머 (250 Hz)
-        self.servo_timer = self.create_timer(0.004, self.servo_loop)
+        self.servo_timer = self.create_timer(0.04, self.servo_loop)
 
     # ---------- 공통 퍼블리시 ----------
     def publish_joint_state(self):
@@ -107,7 +107,7 @@ class BerryControl(Node):
             self.publish_joint_state()
             fb = MoveToNamedPose.Feedback(progress=i/100.0)
             goal_handle.publish_feedback(fb)
-            time.sleep(0.03)                 # 10 ms 블로킹 (멀티스레드 Executor라 OK)
+            time.sleep(0.06)                 # 10 ms 블로킹 (멀티스레드 Executor라 OK)
 
         goal_handle.succeed()
         return MoveToNamedPose.Result(success=True, message="Reached")
@@ -179,7 +179,7 @@ class BerryControl(Node):
             self.publish_joint_state()
             fb = MoveToPose.Feedback(progress=i/150.0)
             goal_handle.publish_feedback(fb)
-            time.sleep(0.03)
+            time.sleep(0.06)
 
         goal_handle.succeed()
         return MoveToPose.Result(success=True, message="Reached")

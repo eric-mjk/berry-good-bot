@@ -105,9 +105,9 @@ void processSerial() {
             for (int i = 0; i < 3; i++) {
               axes[i].targetSteps = lround(tgt[i] * stepsPerDeg[i]);
               // 새 명령이 들어오면 모션 상태 초기화
-              axes[i].curVelSteps = 0;
-              axes[i].carry       = 0;
-              axes[i].lastUs      = micros();
+//              axes[i].curVelSteps = 0;
+//              axes[i].carry       = 0;
+//              axes[i].lastUs      = micros();
             }
             Serial.print(F("🆗 목표 → X:")); Serial.print(tgt[0]);
             Serial.print(F(" Y:"));       Serial.print(tgt[1]);

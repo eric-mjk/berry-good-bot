@@ -79,8 +79,8 @@ def keyboard_servo(node):
     font = pygame.font.SysFont(None, 20)
 
     RATE = 50        # [Hz]
-    VLIN = 0.01
-    VANG = 0.05
+    VLIN = 0.1
+    VANG = 0.5
 
     key_map = {
         pygame.K_w: (1, +VLIN), pygame.K_s: (1, -VLIN),
