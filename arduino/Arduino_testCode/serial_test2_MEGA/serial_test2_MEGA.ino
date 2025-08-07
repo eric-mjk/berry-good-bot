@@ -9,8 +9,8 @@ const float gearRatio[3]  = {20.0, 20.0, 5.0}; // ★수정
 const float initAngle[3]  = {0, 0, 0};
 
 /* ──────── 조인트 최대 속도·가속도(각도 기준) ──────── */
-const float maxVelDeg[3]  = {20, 20, 20};     // °/s (★조정)
-const float maxAccDeg[3]  = {10, 10, 10};  // °/s² (★조정)
+const float maxVelDeg[3]  = {40, 40, 40};     // °/s (★조정)
+const float maxAccDeg[3]  = {20, 20, 20};  // °/s² (★조정)
 
 /* ─────────── 허용 각도 범위 (min, max) ──────────── */
 const float angleLim[3][2] = {{0,130}, {0,250}, {-200,0}};

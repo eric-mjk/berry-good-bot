@@ -1,0 +1,3 @@
+berry_perception:
+  ros__parameters:
+    camera_to_eef: [0.0, 0.0, 0.0,   0.0, 0.0, 0.0]   # [m,rad]  ← 사진 보고 ‘대충 추정’

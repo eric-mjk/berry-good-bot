@@ -17,6 +17,7 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "action/MoveToNamedPose.action"
   "action/MoveToPose.action"
   "action/ServoTwist.action"
+  "action/DetectStrawberry.action"
   DEPENDENCIES std_msgs geometry_msgs          # 사용하는 메시지들
 )
 

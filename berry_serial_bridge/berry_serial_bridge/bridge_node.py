@@ -208,7 +208,7 @@ class Bridge(Node):
         # ◼ 명령 버퍼 + 송신 타이머 (2 Hz)
         self.latest_uno_cmd  = [0.0, 0.0, 0]
         self.latest_mega_cmd = [0.0, 0.0, 0.0]
-        self.send_timer = self.create_timer(0.1, self._send_latest_commands)
+        self.send_timer = self.create_timer(0.02, self._send_latest_commands)
 
         self.logger.info("🕒  두 보드 Homing 완료 메시지를 기다리는 중...")
         self.logger.info(f"조인트 매핑 파라미터: {self.map}")

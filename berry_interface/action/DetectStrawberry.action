@@ -1,0 +1,9 @@
+# DetectStrawberry.action  ─────────────────────────────────────────
+# Goal ------------------------------------------------------------
+float32 offset_z               # ↑optical-Z 로부터 얼마나 떨어진 곳에 접근점?
+---
+# Result ----------------------------------------------------------
+geometry_msgs/PoseStamped  approach_pose_base
+---
+# Feedback --------------------------------------------------------
+geometry_msgs/PoseStamped  strawberry_pose_cam          # 탐지된 딸기 중심
