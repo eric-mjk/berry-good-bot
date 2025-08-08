@@ -175,6 +175,7 @@ def main():
 #    (단위: X,Y,Z[m], ROLL/PITCH/YAW[rad])
 #    예시: (0.1, 0.0, 0.2) 위치, (0, π/2, 0) 자세
 # ros2 run berry_kinematics_control debug_cli pose 0.2958 0.4269 0.2035 1.5708 0.0 -2.9205
+# ros2 run berry_kinematics_control debug_cli pose 0.6289 -0.0057  0.3205 1.5708 0.0 1.5708
 
 # 3) Servo Twist 모드 시작
 #    사용법: servo

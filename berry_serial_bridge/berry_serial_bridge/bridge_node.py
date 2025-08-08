@@ -7,6 +7,7 @@ berry_serial_bridge : RViz <-> UNO & MEGA 시리얼 브리지 노드
 """
 import math, sys, threading, time
 from typing import Dict
+from std_msgs.msg import Int8
 
 import rclpy
 from rclpy.node import Node
@@ -150,20 +151,6 @@ class Bridge(Node):
         self.mega = BoardSerial("MEGA", prm["port_mega"].value,
                                 prm["baud"].value,  self._mega_rx)
 
-        # ◼ 조인트 매핑 파라미터 (YAML로 주입)
-        # # self.map: Dict[str, Dict] = {}
-        # # for name, prm in self._parameters.items():
-        # #     if name.startswith("joint_cfg."):
-        # #         j = name.split('.',1)[1]
-        # #         self.map[j] = prm.value  # dict
-        # self.map: Dict[str, Dict] = {}
-        # cfg_params = self.get_parameters_by_prefix("joint_cfg")
-        # self.logger.info(f"[DBG0] cfg_params → {cfg_params}")
-        # for full_name, param in cfg_params.items():
-        #     # full_name 예) "joint_cfg.joint1"
-        #     j = full_name.split('.', 1)[1]
-        #     self.map[j] = param.value
-
         # ◼ 조인트 매핑 파라미터 (YAML)
         self.map: Dict[str, Dict] = {}
 
@@ -209,6 +196,11 @@ class Bridge(Node):
         self.latest_uno_cmd  = [0.0, 0.0, 0]
         self.latest_mega_cmd = [0.0, 0.0, 0.0]
         self.send_timer = self.create_timer(0.02, self._send_latest_commands)
+
+        # ────── Gripper cmd 구독 (0/1) ───────────────────────────
+        self.latest_grip = 1                                # 기본 열림
+        self.create_subscription(Int8, "/gripper_cmd",
+                                 self._gripper_cb, 10)
 
         self.logger.info("🕒  두 보드 Homing 완료 메시지를 기다리는 중...")
         self.logger.info(f"조인트 매핑 파라미터: {self.map}")
@@ -311,12 +303,13 @@ class Bridge(Node):
             else:
                 mega_cmd[cfg['idx']] = val
 
+        uno_cmd[2] = self.latest_grip               # G 필드에 적용
         # pygame에 표시
         self.ui.tx_uno  = uno_cmd.copy()
         self.ui.tx_mega = mega_cmd.copy()
         self.ui.topic_vals = {n: round(p,3) for n,p in name2pos.items()}
 
-        self.logger.info(f"명령 변환 → UNO {uno_cmd} | MEGA {mega_cmd}")
+        # self.logger.info(f"명령 변환 → UNO {uno_cmd} | MEGA {mega_cmd}")
         # self.uno.send(f"{uno_cmd[0]:.1f} {uno_cmd[1]:.1f} {int(uno_cmd[2])}a\n")
         # self.mega.send(f"{mega_cmd[0]:.1f} {mega_cmd[1]:.1f} {mega_cmd[2]:.1f}a\n")
 
@@ -334,18 +327,23 @@ class Bridge(Node):
         self.ui.curr_js = {n: round(p,3) for n,p in zip(msg.name, msg.position)}
         # self.logger.info(f"피드백 퍼블리시: {list(msg.name)}={list(msg.position)}")
 
-    # ── 주기 송신 (2 Hz) ─────────────────────────────
+    # ── 주기 송신 ─────────────────────────────
     def _send_latest_commands(self):
         """2 Hz로 최신 버퍼 명령을 보드에 전송"""
         if not self.started: return
         u = self.latest_uno_cmd
         m = self.latest_mega_cmd
-        self.logger.info(f"주기 송신 → UNO {u} | MEGA {m}")
+        # self.logger.info(f"주기 송신 → UNO {u} | MEGA {m}")
         self.uno.send(f"{u[0]:.1f} {u[1]:.1f} {int(u[2])}a\n")
         self.mega.send(f"{m[0]:.1f} {m[1]:.1f} {m[2]:.1f}a\n")
         # UI 갱신
         self.ui.tx_uno  = u.copy()
         self.ui.tx_mega = m.copy()
+
+    # ── Gripper 토픽 콜백 ────────────────────────
+    def _gripper_cb(self, msg: Int8):
+        self.latest_grip = 1 if msg.data else 0
+        self.ui.topic_vals["/gripper_cmd"] = self.latest_grip
 
     # ── 종료 ────────────────────────────────────
     def destroy_node(self):
