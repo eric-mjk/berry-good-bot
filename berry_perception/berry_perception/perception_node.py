@@ -5,7 +5,7 @@ from rclpy.action          import ActionServer
 from sensor_msgs.msg       import Image, CameraInfo
 from geometry_msgs.msg     import TransformStamped, PoseStamped, Point, Quaternion
 from visualization_msgs.msg import Marker
-from tf2_ros               import StaticTransformBroadcaster, Buffer, TransformListener
+from tf2_ros               import StaticTransformBroadcaster, Buffer, TransformListener, TransformBroadcaster
 import tf_transformations   as tft
 from cv_bridge             import CvBridge
 from ultralytics           import YOLO
@@ -31,7 +31,7 @@ class PerceptionNode(Node):
         self.declare_parameter('camera_frame', 'camera_link')
         self.declare_parameter('eef_frame',     'link5')
         # self.declare_parameter('camera_to_eef', [0.0, 0.08, 0.045,  math.pi/180*30, -math.pi/2, -math.pi/2]) # xyz + rpy
-        self.declare_parameter('camera_to_eef', [0.0, 0.09, 0.045,  math.pi/180*0, -math.pi/2, -math.pi/2]) # xyz + rpy
+        self.declare_parameter('camera_to_eef', [0.035, 0.09, 0.045,  math.pi/180*0, -math.pi/2, -math.pi/2]) # xyz + rpy
         cam2eef = self.get_parameter('camera_to_eef').value
         self.logger.debug(f"[PARAM] camera_to_eef = {cam2eef}")
         self.publish_static_tf(cam2eef)
@@ -49,6 +49,8 @@ class PerceptionNode(Node):
         # TF buffer for base_link 변환
         self.tfb  = Buffer()
         self.tfl  = TransformListener(self.tfb, self)
+        # 접근 목표를 TF로도 시각화하기 위한 동적 브로드캐스터
+        self.tf_dyn = TransformBroadcaster(self)
 
         # RViz marker publisher
         self.marker_pub = self.create_publisher(Marker, 'strawberry_mark',  10)
@@ -230,36 +232,139 @@ class PerceptionNode(Node):
 
         st_base = (mat_cam2base @ p_cam)[:3]            # 딸기 위치(base)
 
-        # ② link4 z축으로 0.04 m 이동
+        # # ② link4 z축으로 0.04 m 이동
+        # tf_link4 = self.tfb.lookup_transform('base_link', 'link4', rclpy.time.Time())
+        # R_link4  = tft.quaternion_matrix((tf_link4.transform.rotation.x,
+        #                                   tf_link4.transform.rotation.y,
+        #                                   tf_link4.transform.rotation.z,
+        #                                   tf_link4.transform.rotation.w))
+        # z_axis   = R_link4[:3, 2]
+        # appr_pos = st_base + 0.04 * z_axis
+
+        # # ③ link5 원점 → 딸기 벡터 방향으로 offset_z 만큼 당겨오기
+        # tf_link5  = self.tfb.lookup_transform('base_link', 'link5', rclpy.time.Time())
+        # link5_org = np.array([tf_link5.transform.translation.x,
+        #                       tf_link5.transform.translation.y,
+        #                       tf_link5.transform.translation.z])
+        # vec       = st_base - link5_org
+        # vec_norm  = vec / np.linalg.norm(vec)
+        # appr_pos  = appr_pos - offset_z * vec_norm
+
+        # ② 접근점 계산 (필수: link4의 XY 평면으로 사영한 벡터 사용)
+        #    - vec = (딸기 - link5 원점)
+        #    - vec 을 link4의 XY 평면(법선 = link4 z축)으로 사영 → v_proj
+        #    - 최종 접근점 = st_base + 0.04 * z4  -  offset_z * normalize(v_proj)
+        #
+        #    주의: 사영 벡터 크기가 너무 작으면(link4 z축과 거의 평행) link4 x축을 대체 방향으로 사용
         tf_link4 = self.tfb.lookup_transform('base_link', 'link4', rclpy.time.Time())
-        R_link4  = tft.quaternion_matrix((tf_link4.transform.rotation.x,
-                                          tf_link4.transform.rotation.y,
-                                          tf_link4.transform.rotation.z,
-                                          tf_link4.transform.rotation.w))
-        z_axis   = R_link4[:3, 2]
-        appr_pos = st_base + 0.04 * z_axis
+        R_link4  = tft.quaternion_matrix((
+            tf_link4.transform.rotation.x,
+            tf_link4.transform.rotation.y,
+            tf_link4.transform.rotation.z,
+            tf_link4.transform.rotation.w
+        ))
+        z4 = R_link4[:3, 2]    # link4 z-axis (plane normal)
 
-        # ③ link5 원점 → 딸기 벡터 방향으로 offset_z 만큼 당겨오기
         tf_link5  = self.tfb.lookup_transform('base_link', 'link5', rclpy.time.Time())
-        link5_org = np.array([tf_link5.transform.translation.x,
-                              tf_link5.transform.translation.y,
-                              tf_link5.transform.translation.z])
-        vec       = st_base - link5_org
-        vec_norm  = vec / np.linalg.norm(vec)
-        appr_pos  = appr_pos - offset_z * vec_norm
+        link5_org = np.array([
+            tf_link5.transform.translation.x,
+            tf_link5.transform.translation.y,
+            tf_link5.transform.translation.z
+        ])
+        vec      = st_base - link5_org
+        # (orientation 계산에서 사용하므로 기존 정규화 벡터도 유지)
+        vec_norm = vec / (np.linalg.norm(vec) + 1e-12)
 
-        # ④ EEF orientation: x-axis를 vec 방향으로 정렬
-        x_axis = vec_norm
-        z_ref  = np.array([0.0, 0.0, 1.0])
-        y_axis = np.cross(z_ref, x_axis)
-        if np.linalg.norm(y_axis) < 1e-4:
-            y_axis = np.array([0.0, 1.0, 0.0])
-        y_axis /= np.linalg.norm(y_axis)
-        z_axis_eef = np.cross(x_axis, y_axis)
+        # link4 XY 평면으로 사영
+        v_proj   = vec - np.dot(vec, z4) * z4
+        n_proj   = np.linalg.norm(v_proj)
+        if n_proj < 1e-6:
+            # 사영이 거의 0이면 link4 x축을 안전한 대체 방향으로 사용
+            x4   = R_link4[:3, 0]
+            v_dir = x4 / (np.linalg.norm(x4) + 1e-12)
+        else:
+            v_dir = v_proj / n_proj
+
+        # 최종 접근점: 사영된 평면 방향으로 offset, 그리고 link4 z축으로 0.04 상승
+        appr_pos = st_base + 0.02 * z4 - offset_z * v_dir
+        # # ④ EEF orientation: x-axis를 vec 방향으로 정렬
+        # x_axis = vec_norm
+        # z_ref  = np.array([0.0, 0.0, 1.0])
+        # y_axis = np.cross(z_ref, x_axis)
+        # if np.linalg.norm(y_axis) < 1e-4:
+        #     y_axis = np.array([0.0, 1.0, 0.0])
+        # y_axis /= np.linalg.norm(y_axis)
+        # z_axis_eef = np.cross(x_axis, y_axis)
+        # # R_eef = np.eye(4)
+        # # R_eef[:3, 0] = x_axis
+        # # R_eef[:3, 1] = y_axis
+        # # R_eef[:3, 2] = z_axis_eef
+        # # q_eef = tft.quaternion_from_matrix(R_eef)
+
+        # # --- 축 재매핑 ---
+        # # 요구사항:
+        # #   현재 x축 → z축,  y축 → x축,  z축 → y축
+        # # 즉, new_x = old_y, new_y = old_z, new_z = old_x
+        # R_eef = np.eye(4)
+        # # col0(x) := old y
+        # R_eef[:3, 0] = y_axis
+        # # col1(y) := old z
+        # R_eef[:3, 1] = z_axis_eef
+        # # col2(z) := old x
+        # R_eef[:3, 2] = x_axis
+        # q_eef = tft.quaternion_from_matrix(R_eef)
+
+        # ④ EEF orientation (y축 고정):
+        #    - link5의 y축은 유지
+        #    - (딸기 - link5) 벡터를 link5의 XZ 평면에 사영
+        #    - 사영된 벡터 방향으로 z축을 정렬
+        #    - x축은 y × z로 직교화(우수좌법 유지)
+        #
+        #    참고: link5의 현재 축은 R_link5의 컬럼 벡터
+        R_link5 = tft.quaternion_matrix((
+            tf_link5.transform.rotation.x,
+            tf_link5.transform.rotation.y,
+            tf_link5.transform.rotation.z,
+            tf_link5.transform.rotation.w
+        ))
+        x5 = R_link5[:3, 0]
+        y5 = R_link5[:3, 1]   # 🔒 고정해야 하는 축
+        z5 = R_link5[:3, 2]
+        # (1) vec을 y5에 수직한 평면(= link5 XZ 평면)에 사영
+        v_proj = vec_norm - np.dot(vec_norm, y5) * y5
+        n_v = np.linalg.norm(v_proj)
+        if n_v < 1e-6:
+            # 사영이 거의 0이면 현재 z축 유지(특이상황)
+            z_axis_eef = z5 / np.linalg.norm(z5)
+        else:
+            z_axis_eef = v_proj / n_v
+        # (2) y축은 유지, x축은 y × z 로 결정(정규화)
+        y_axis = y5 / np.linalg.norm(y5)
+        x_axis = np.cross(y_axis, z_axis_eef)
+        nx = np.linalg.norm(x_axis)
+        if nx < 1e-6:
+            # 혹시라도 수치 문제면 기존 x5 사용
+            x_axis = x5 / np.linalg.norm(x5)
+            # z 재계산으로 직교화 시도
+            z_axis_eef = np.cross(x_axis, y_axis)
+            z_axis_eef /= (np.linalg.norm(z_axis_eef) + 1e-12)
+        else:
+            x_axis /= nx
+            # z를 다시 한번 직교화(수치 안정)
+            z_axis_eef = np.cross(x_axis, y_axis)
+            z_axis_eef /= (np.linalg.norm(z_axis_eef) + 1e-12)
+
+        # --- (필요한 프레임 매핑이 있을 경우) 축 재매핑 유지 ---
+        # 기존 요구사항:
+        #   현재 x축 → z축,  y축 → x축,  z축 → y축
+        # 즉, 최종 회전행렬의 컬럼 순서를 [y, z, x]로 배치
         R_eef = np.eye(4)
-        R_eef[:3, 0] = x_axis
-        R_eef[:3, 1] = y_axis
-        R_eef[:3, 2] = z_axis_eef
+        # R_eef[:3, 0] = y_axis        # new x  <- old y
+        # R_eef[:3, 1] = z_axis_eef    # new y  <- old z
+        # R_eef[:3, 2] = x_axis        # new z  <- old x
+        R_eef[:3, 0] = x_axis        # new x  <- old y
+        R_eef[:3, 1] = y_axis   # new y  <- old z
+        R_eef[:3, 2] = z_axis_eef        # new z  <- old x
         q_eef = tft.quaternion_from_matrix(R_eef)
 
         # ─── 최종 approach pose 로그 ──────────────────────────
@@ -281,6 +386,17 @@ class PerceptionNode(Node):
         # RViz 마커 두 개 ---------------------------------------------------
         self.publish_marker(st_pose_cam, id=0, color=(1.0, 0.0, 0.0))  # red
         self.publish_marker(appro_pose_base, id=1, color=(0.0, 1.0, 0.0))  # green
+
+        # ── 접근 목표를 TF로도 publish (base_link -> approach_target) ──
+        t = TransformStamped()
+        t.header.stamp = self.get_clock().now().to_msg()
+        t.header.frame_id = 'base_link'
+        t.child_frame_id  = 'approach_target'   # RViz에서 이 프레임 선택해 확인
+        t.transform.translation.x = appro_pose_base.pose.position.x
+        t.transform.translation.y = appro_pose_base.pose.position.y
+        t.transform.translation.z = appro_pose_base.pose.position.z
+        t.transform.rotation      = appro_pose_base.pose.orientation
+        self.tf_dyn.sendTransform(t)
 
         goal_handle.succeed()
         return DetectStrawberry.Result(approach_pose_base=appro_pose_base)

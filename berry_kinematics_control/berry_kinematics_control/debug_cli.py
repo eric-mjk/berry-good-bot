@@ -47,8 +47,12 @@ def send_pose(node, xyzrpy):
 def start_servo(node):
     ac = ActionClient(node, ServoTwist, "servo_twist")
     ac.wait_for_server()
-    goal = ServoTwist.Goal()
-    fut = ac.send_goal_async(goal)
+    # goal = ServoTwist.Goal()
+    # fut = ac.send_goal_async(goal)
+    # pub = node.create_publisher(Twist, "/eef_twist_cmd", 10)
+    gh_fut = ac.send_goal_async(ServoTwist.Goal())
+    rclpy.spin_until_future_complete(node, gh_fut)
+    gh = gh_fut.result()
     pub = node.create_publisher(Twist, "/eef_twist_cmd", 10)
     print("Streaming random twist (Ctrl-C to stop)…")
     try:
@@ -58,8 +62,23 @@ def start_servo(node):
             pub.publish(tw)
             time.sleep(0.05)
     except KeyboardInterrupt:
+    #     pass
+    # ac.cancel_goal_async(fut.result().goal_id)
         pass
-    ac.cancel_goal_async(fut.result().goal_id)
+    finally:
+        # 안전 정지: 제로 트위스트 몇 번 보내고 취소
+        z = Twist()
+        for _ in range(5):
+            pub.publish(z)
+            time.sleep(0.02)
+        cancel_fut = gh.cancel_goal_async()
+        rclpy.spin_until_future_complete(node, cancel_fut)
+        # (선택) 결과 드레인
+        try:
+            res_fut = gh.get_result_async()
+            rclpy.spin_until_future_complete(node, res_fut, timeout_sec=2.0)
+        except Exception:
+            pass
 
 # ---------- 키보드 서보 ----------
 def keyboard_servo(node):
@@ -126,11 +145,26 @@ def keyboard_servo(node):
 
     # --- 정리 --------------------------------------------------------------
     pygame.quit()
-    # ac.cancel_goal_async(gh_fut.result().goal_id)
+    # # ac.cancel_goal_async(gh_fut.result().goal_id)
 
+    # goal_handle = gh_fut.result()                 # 🔹 ClientGoalHandle
+    # cancel_fut  = goal_handle.cancel_goal_async() # 메서드는 여기 존재
+    # rclpy.spin_until_future_complete(node, cancel_fut)
     goal_handle = gh_fut.result()                 # 🔹 ClientGoalHandle
-    cancel_fut  = goal_handle.cancel_goal_async() # 메서드는 여기 존재
+    # 안전 정지 후 취소
+    z = Twist()
+    for _ in range(5):
+        pub.publish(z)
+        time.sleep(0.02)
+    cancel_fut  = goal_handle.cancel_goal_async()
     rclpy.spin_until_future_complete(node, cancel_fut)
+    # (선택) 결과 드레인
+    try:
+        res_fut = goal_handle.get_result_async()
+        rclpy.spin_until_future_complete(node, res_fut, timeout_sec=2.0)
+    except Exception:
+        pass
+
 
 def main():
     rclpy.init()

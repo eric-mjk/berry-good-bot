@@ -1,0 +1,4 @@
+# config/bt/rough_approach_test2.yaml
+
+tree_file_path: "/home/wossas/Desktop/strawberry_robotArm/strawberry_ws/src/berry-good-bot/behavior_trees/roughApproachBT_test2.xml"
+register_node_types: ["named_pose_nodes", "rough_approach_nodes"]

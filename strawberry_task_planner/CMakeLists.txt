@@ -15,6 +15,7 @@ find_package(rclcpp REQUIRED)
 find_package(rclcpp_action REQUIRED)
 find_package(std_msgs REQUIRED)
 find_package(sensor_msgs REQUIRED)
+find_package(tf2_ros REQUIRED)
 find_package(behaviortree_cpp_v3 REQUIRED)
 
 find_package(ament_index_cpp REQUIRED) # 추가
@@ -34,6 +35,7 @@ set(dependencies
   rclcpp_action
   std_msgs
   sensor_msgs
+  tf2_ros
   berry_interface
   behaviortree_cpp_v3
   ament_index_cpp

@@ -58,10 +58,14 @@ class BerryControl(Node):
 
         self.servo_srv = ActionServer(
             self, ServoTwist, "servo_twist",
-            execute_callback=self.exec_servo)
+            execute_callback=self.exec_servo,
+            goal_callback=self.servo_goal_cb,
+            cancel_callback=self.servo_cancel_cb)
 
         # servo 모드 변수
         self.servo_active = False
+        self._servo_busy  = False          # goal 수락 여부 제어
+        self._servo_canceled = False       # 이번 goal이 취소됐는지 플래그
         self.latest_twist = np.zeros(6)
         self.twist_sub = self.create_subscription(
             Twist, "/eef_twist_cmd", self.twist_cb, 10)
@@ -86,7 +90,10 @@ class BerryControl(Node):
     async def exec_named(self, goal_handle):
         pose_name = goal_handle.request.pose_name
 
-        self.get_logger().info(f"[exec_named] 요청받음 → `{pose_name}`")
+        # self.get_logger().info(f"[exec_named] 요청받음 → `{pose_name}`")+        
+        t0 = time.time()
+        self.get_logger().info(f"[exec_named] ▶ START  pose=`{pose_name}`")
+
         if pose_name not in self.named_poses:
             goal_handle.abort()
             return MoveToNamedPose.Result(success=False,
@@ -102,12 +109,19 @@ class BerryControl(Node):
         # 많으면 잘라내기
         elif target_q.size > self.n_joints:
             target_q = target_q[: self.n_joints]
-        for i, q in enumerate(lspb_interpolate(self.current_q, target_q, 100)):
+        n_steps = 100
+        for i, q in enumerate(lspb_interpolate(self.current_q, target_q, n_steps)):
             self.current_q = q
             self.publish_joint_state()
-            fb = MoveToNamedPose.Feedback(progress=i/100.0)
+            fb = MoveToNamedPose.Feedback(progress=i/float(n_steps))
             goal_handle.publish_feedback(fb)
             time.sleep(0.06)                 # 10 ms 블로킹 (멀티스레드 Executor라 OK)
+ 
+        err = float(np.linalg.norm(self.current_q - target_q))
+        dt  = time.time() - t0
+        self.get_logger().info(
+            f"[exec_named] ✔ DONE  pose=`{pose_name}`  steps={n_steps}  "
+            f"final_err={err:.6f}  elapsed={dt:.2f}s")
 
         goal_handle.succeed()
         return MoveToNamedPose.Result(success=True, message="Reached")
@@ -116,7 +130,9 @@ class BerryControl(Node):
     async def exec_pose(self, goal_handle):
         target = goal_handle.request.target_pose
 
-        self.get_logger().info(f"[exec_pose] 요청받음 → pos=({target.pose.position.x:.3f},"
+        # self.get_logger().info(f"[exec_pose] 요청받음 → pos=({target.pose.position.x:.3f},"
+        t0 = time.time()
+        self.get_logger().info(f"[exec_pose] ▶ START  pos=({target.pose.position.x:.3f},"
                                f"{target.pose.position.y:.3f},{target.pose.position.z:.3f}), "
                                "ori=(%.2f,%.2f,%.2f,%.2f)" % (
                                  target.pose.orientation.w,
@@ -173,25 +189,66 @@ class BerryControl(Node):
 
         # origin(0) 제외하고 실제 관절만 추출
         target_q = np.asarray(ik_sol[1 : 1 + self.n_joints])
-
-        for i, q in enumerate(lspb_interpolate(self.current_q, target_q, 150)):
+        n_steps = 150
+        for i, q in enumerate(lspb_interpolate(self.current_q, target_q, n_steps)):
             self.current_q = q
             self.publish_joint_state()
-            fb = MoveToPose.Feedback(progress=i/150.0)
+            fb = MoveToPose.Feedback(progress=i/float(n_steps))
             goal_handle.publish_feedback(fb)
             time.sleep(0.06)
 
+        err = float(np.linalg.norm(self.current_q - target_q))
+        dt  = time.time() - t0
+        self.get_logger().info(
+            f"[exec_pose] ✔ DONE  steps={n_steps}  final_err={err:.6f}  elapsed={dt:.2f}s")
         goal_handle.succeed()
         return MoveToPose.Result(success=True, message="Reached")
 
     # ---------- ServoTwist ----------
     async def exec_servo(self, goal_handle):
-        self.get_logger().info("[exec_servo] mode 시작")
+        self.get_logger().info("[exec_servo] ▶ START  (entering servo mode)")
+
+        # 이번 goal 시작 세팅
+        self._servo_canceled = False
         self.servo_active = True
-        while self.servo_active and rclpy.ok():
-            time.sleep(0.1)        # 100 ms 정도 간격으로 취소 요청 확인
-        goal_handle.succeed()
-        return ServoTwist.Result(success=True, message="Servo stopped")
+        try:
+            # while rclpy.ok():
+            #     # 클라이언트에서 cancel 요청되면 즉시 중단
+            #     if goal_handle.is_cancel_requested:
+            #         self.get_logger().info("[exec_servo] ⛔ CANCEL requested → stopping servo")
+            #         self.servo_active = False
+            #         self.latest_twist[:] = 0.0
+            #         goal_handle.canceled()
+            #         self.get_logger().info("[exec_servo] ✖ CANCELED")
+            #         return ServoTwist.Result(success=False, message="Canceled")
+            #     if not self.servo_active:
+            #         break
+            #     time.sleep(0.1)    # 100 ms 간격으로 상태 확인
+            while rclpy.ok() and self.servo_active:
+                # 취소가 서버 측에 반영되면 is_cancel_requested가 True가 됨
+                if goal_handle.is_cancel_requested:
+                    self.get_logger().info("[exec_servo] ⛔ CANCEL requested → stopping servo")
+                    self._servo_canceled = True
+                    self.servo_active = False
+                    break
+                time.sleep(0.1)    # 100 ms 간격으로 상태 확인
+        finally:
+            # 루프 종료 시엔 최신 twist를 0으로 (안전)
+            self.latest_twist[:] = 0.0
+        # self.get_logger().info("[exec_servo] ✔ DONE  (servo stopped)")
+        # goal_handle.succeed()
+        # return ServoTwist.Result(success=True, message="Servo stopped")
+            self._servo_busy = False
+
+        # 결과 마킹
+        if self._servo_canceled:
+            self.get_logger().info("[exec_servo] ✖ CANCELED")
+            goal_handle.canceled()
+            return ServoTwist.Result(success=False, message="Canceled")
+        else:
+            self.get_logger().info("[exec_servo] ✔ DONE  (servo stopped)")
+            goal_handle.succeed()
+            return ServoTwist.Result(success=True, message="Servo stopped")
 
     def servo_loop(self):
         if not self.servo_active:
@@ -221,6 +278,29 @@ class BerryControl(Node):
         T[:3, 3]  = [p.x, p.y, p.z]
         return T
 
+    # ---------- 액션 콜백들 ----------
+    def servo_goal_cb(self, goal_request):
+        """
+        동시에 하나의 서보 goal만 허용. 바쁘면 REJECT.
+        """
+        if self._servo_busy or self.servo_active:
+            self.get_logger().warn("[servo_goal_cb] busy → reject new servo goal")
+            return GoalResponse.REJECT
+        self._servo_busy = True
+        self.get_logger().info("[servo_goal_cb] ACCEPT servo goal")
+        return GoalResponse.ACCEPT
+
+    def servo_cancel_cb(self, cancel_request):
+        """
+        취소 요청은 항상 승인. 즉시 루프를 멈추도록 플래그/트위스트 0 설정.
+        (rclpy 기본은 'No cancellations' 이라 명시적으로 ACCEPT 해야 함)
+        """
+        self.get_logger().info("[servo_cancel_cb] CANCEL request received → ACCEPT")
+        self._servo_canceled = True
+        self.servo_active = False
+        self.latest_twist[:] = 0.0
+        return CancelResponse.ACCEPT
+    
 def main():
     # rclpy.init()
     # node = BerryControl()

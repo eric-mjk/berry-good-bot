@@ -1,7 +1,8 @@
 defaults:
   - _self_          # <= 반드시 첫 항목(또는 마지막)에 추가
-  - bt: berry_named_pose_test2   # 
+  - bt: rough_approach_test2   # 
   # harvest or rough_approach_test or berry_named_pose_test1
+  # rough_approach_test1 or 
   - robot: fake
   - env: sim
 

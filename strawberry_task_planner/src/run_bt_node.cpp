@@ -10,6 +10,7 @@
 #include "strawberry_task_planner/fake_nodes.hpp" 
 #include "strawberry_task_planner/rough_approach_nodes.hpp" // 새로 추가할 노드
 #include "strawberry_task_planner/named_pose_nodes.hpp"
+#include "strawberry_task_planner/rough_approach_bt_nodes.hpp"
 
 
 namespace strawberry_bt_nodes {
@@ -65,7 +66,7 @@ int main(int argc, char **argv)
                 factory.registerNodeType<FakePerception>("fake_StrawberryPerception");
                 factory.registerNodeType<FakeApproach>("fake_RoughApproach");
                 factory.registerNodeType<FakeServoCut>("fake_ServoAndCut");
-            } else if (type_name == "rough_approach_nodes") {
+            } else if (type_name == "rough_approach_moveit_nodes") {
 
                 RCLCPP_INFO(node->get_logger(), "Registering Rough Approach Nodes (TestPerception, PerceptionVisualizer, RoughApproach)");
                 factory.registerNodeType<strawberry_bt_nodes::TestPerception>("TestPerception");
@@ -77,6 +78,12 @@ int main(int argc, char **argv)
                 factory.registerNodeType<strawberry_bt_nodes::MoveToNamedPoseBT>("MoveToNamedPose");
                 factory.registerNodeType<strawberry_bt_nodes::WaitRealRobotSync>("WaitRealRobotSync");
                 
+            } else if (type_name == "rough_approach_nodes") {
+                // 🔹 새 BT 노드 2종
+                RCLCPP_INFO(node->get_logger(), "Registering Rough Approach BT Nodes (DetectApproachPose, ServoToTargetPose)");
+                factory.registerNodeType<strawberry_bt_nodes::DetectApproachPoseBT>("DetectApproachPose");
+                factory.registerNodeType<strawberry_bt_nodes::ServoToTargetPoseBT>("ServoToTargetPose");
+     
             } else {
                     RCLCPP_WARN(node->get_logger(), "Unknown node type group '%s' in 'register_node_types' parameter. Skipping.", type_name.c_str());
                 }

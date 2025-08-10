@@ -57,12 +57,28 @@ public:
       client_ = rclcpp_action::create_client<MoveToNamedPose>(g_ros_node, "move_to_named_pose");
     }
 
+    // using namespace std::chrono_literals;
+    // if (!client_->wait_for_action_server(2s)) {
+    //   std::cerr << "[MoveToNamedPose] action server not available\n";
+    //   return BT::NodeStatus::FAILURE;
+    // }
+
     using namespace std::chrono_literals;
-    if (!client_->wait_for_action_server(2s)) {
-      std::cerr << "[MoveToNamedPose] action server not available\n";
+    // Robust wait: retry in small steps up to ~12s total
+    const auto step   = 300ms;
+    const auto total  = 12s;
+    auto waited       = 0ms;
+    bool ready        = false;
+    while (rclcpp::ok() && waited < total) {
+      if (client_->wait_for_action_server(step)) { ready = true; break; }
+      waited += step;
+    }
+    if (!ready) {
+      std::cerr << "[MoveToNamedPose] action server not available after "
+                << std::chrono::duration_cast<std::chrono::seconds>(waited).count()
+                << "s\n";
       return BT::NodeStatus::FAILURE;
     }
-
     // Goal 전송
     MoveToNamedPose::Goal goal;
     goal.pose_name = pose_name;

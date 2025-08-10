@@ -1,0 +1,36 @@
+<!-- /behavior_trees/roughApproachBT_test2.xml -->
+<root main_tree_to_execute="RoughApproachMain">
+  <BehaviorTree ID="RoughApproachMain">
+    <Sequence name="RoughApproachSequence">
+      <!-- 1) 미리 자세 -->
+      <MoveToNamedPose pose="ready"/>
+      <WaitRealRobotSync tolerance="0.01" stable_time="0.5" timeout="30.0"/>
+
+      <!-- 2) 탐지 → 접근점(base_link) 산출, 블랙보드에 저장 -->
+      <DetectApproachPose offset_z="0.01"
+                          ax="{appr_x}" ay="{appr_y}" az="{appr_z}"
+                          qx="{appr_qx}" qy="{appr_qy}" qz="{appr_qz}" qw="{appr_qw}"/>
+
+      <!-- 3) 서보로 접근 (블랙보드 값 사용) -->
+      <ServoToTargetPose ax="{appr_x}" ay="{appr_y}" az="{appr_z}"
+                         qx="{appr_qx}" qy="{appr_qy}" qz="{appr_qz}" qw="{appr_qw}"
+                         base_frame="base_link" tip_frame="link5"
+                         kp_pos="0.8" kp_ori="1.2"
+                         vmax_lin="0.2" vmin_lin="0.1"
+                         vmax_ang="1.0"  vmin_ang="0.5"
+                         pos_tol="0.01" ori_tol="0.05"
+                         stable_time="0.5" timeout="40.0"/>
+
+      <WaitRealRobotSync tolerance="0.01" stable_time="0.5" timeout="30.0"/>
+
+      <MoveToNamedPose pose="ready"/>
+      <WaitRealRobotSync tolerance="0.01" stable_time="0.5" timeout="30.0"/>
+
+      <!-- 4) 장바구니로 이동 후 홈 -->
+      <MoveToNamedPose pose="basket"/>
+      <WaitRealRobotSync tolerance="0.01" stable_time="0.5" timeout="30.0"/>
+      <MoveToNamedPose pose="home"/>
+      <WaitRealRobotSync tolerance="0.01" stable_time="0.5" timeout="30.0"/>
+    </Sequence>
+  </BehaviorTree>
+</root>
