@@ -1,0 +1,14 @@
+<!-- behavior_trees/berryNamedPoseTest1.xml -->
+<root main_tree_to_execute="NamedPoseMain">
+  <BehaviorTree ID="NamedPoseMain">
+    <Sequence name="Go_Ready_Basket_Home">
+      <!-- 동일한 노드 타입에 pose 인풋 포트만 다르게 넘김 -->
+      <MoveToNamedPose pose="ready"/>
+      <WaitRealRobotSync tolerance="0.01" stable_time="0.5" timeout="30.0"/>
+      <MoveToNamedPose pose="basket"/>
+      <WaitRealRobotSync tolerance="0.01" stable_time="0.5" timeout="30.0"/>
+      <MoveToNamedPose pose="home"/>
+      <WaitRealRobotSync tolerance="0.01" stable_time="0.5" timeout="30.0"/>
+    </Sequence>
+  </BehaviorTree>
+</root>

@@ -209,30 +209,6 @@ class PerceptionNode(Node):
         goal_handle.publish_feedback(
             DetectStrawberry.Feedback(strawberry_pose_cam=st_pose_cam))
 
-        # # 접근점 = Z축 앞으로 offset
-        # appr_cam = PoseStamped()
-        # appr_cam.header = st_pose_cam.header
-        # appr_cam.pose.position = Point(x=X, y=Y, z=Z - offset_z)
-        # appr_cam.pose.orientation.w = 1.0
-        # # ─── 접근점: 카메라 "앞(+x, body-frame)" 쪽으로 offset 만큼 당겨오기 ───
-        # appr_cam = PoseStamped()
-        # appr_cam.header = st_pose_cam.header
-        # appr_cam.pose.position = Point(
-        #     x=X - offset_z,   # forward(+) → 카메라 쪽으로 offset 만큼 -
-        #     y=Y,
-        #     z=Z,
-        # )
-        # appr_cam.pose.orientation.w = 1.0
-        # self.logger.info(
-        #     f"[APPROACH] base-cam X-offset {offset_z:.3f} → approach (x={appr_cam.pose.position.x:.3f}, "
-        #     f"y={Y:.3f}, z={Z:.3f})")
-
-        # ─── 접근점 계산 로직 수정 ─────────────────────────────
-        # ① strawberry(cam) → base_link
-        # p_cam  = np.array([X, Y, Z, 1.0])
-        # p_base = mat @ p_cam
-        # st_base = p_base[:3]
-
         p_cam  = np.array([X, Y, Z, 1.0])
         try:
             tf_cam2base = self.tfb.lookup_transform(
@@ -286,48 +262,12 @@ class PerceptionNode(Node):
         R_eef[:3, 2] = z_axis_eef
         q_eef = tft.quaternion_from_matrix(R_eef)
 
-        # # 카메라→base_link TF 변환
-        # try:
-        #     tf_cam2base = self.tfb.lookup_transform(
-        #         'base_link', st_pose_cam.header.frame_id,
-        #         rclpy.time.Time())  # 가장 최근
-        #     mat = tft.concatenate_matrices(
-        #         tft.translation_matrix((tf_cam2base.transform.translation.x,
-        #                                 tf_cam2base.transform.translation.y,
-        #                                 tf_cam2base.transform.translation.z)),
-        #         tft.quaternion_matrix(
-        #             (tf_cam2base.transform.rotation.x,
-        #              tf_cam2base.transform.rotation.y,
-        #              tf_cam2base.transform.rotation.z,
-        #              tf_cam2base.transform.rotation.w)))
-        #     # p = np.array([appr_cam.pose.position.x,
-        #     #               appr_cam.pose.position.y,
-        #     #               appr_cam.pose.position.z, 1.0])
-        #     # p_base = mat @ p
-        #     # self.logger.info(f"[TF] base_link coords = {p_base[:3]}")
-        #     p_base = appr_pos
-        #     self.logger.info(f"[TF] approach(base_link) = {p_base}")
-        # except Exception as e:
-        #     self.get_logger().error(f"TF error: {e}")
-        #     goal_handle.abort()
-        #     return DetectStrawberry.Result()
-
         # ─── 최종 approach pose 로그 ──────────────────────────
         self.logger.info(f"[TF] approach(base_link) = {appr_pos}")
 
         appro_pose_base = PoseStamped()
         appro_pose_base.header.frame_id = 'base_link'
         appro_pose_base.header.stamp = self.get_clock().now().to_msg()
-        # appro_pose_base.pose.position = Point(*p_base[:3])
-
-        # Point는 키워드 인자만 받습니다.
-        # appro_pose_base.pose.position = Point(
-        #     x=float(p_base[0]),
-        #     y=float(p_base[1]),
-        #     z=float(p_base[2]),
-        # )
-
-        # appro_pose_base.pose.orientation.w = 1.0
 
         appro_pose_base.pose.position = Point(
             x=float(appr_pos[0]),

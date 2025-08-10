@@ -1,0 +1,3 @@
+# config/bt/berry_named_pose_test.yaml
+tree_file_path: "/home/wossas/Desktop/strawberry_robotArm/strawberry_ws/src/berry-good-bot/behavior_trees/berryNamedPoseTest1.xml"
+register_node_types: ["named_pose_nodes"]

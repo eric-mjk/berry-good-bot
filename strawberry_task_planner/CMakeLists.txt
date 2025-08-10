@@ -14,6 +14,7 @@ find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(rclcpp_action REQUIRED)
 find_package(std_msgs REQUIRED)
+find_package(sensor_msgs REQUIRED)
 find_package(behaviortree_cpp_v3 REQUIRED)
 
 find_package(ament_index_cpp REQUIRED) # 추가
@@ -24,12 +25,16 @@ find_package(tf2_geometry_msgs REQUIRED) # For tf2::doTransform or general pose 
 
 find_package(geometry_msgs REQUIRED)
 
+find_package(berry_interface REQUIRED)
+
 
 # 모든 실행 파일이 사용할 의존성 목록을 정의합니다. (ros2_bt_tut 스타일)
 set(dependencies
   rclcpp
   rclcpp_action
   std_msgs
+  sensor_msgs
+  berry_interface
   behaviortree_cpp_v3
   ament_index_cpp
   moveit_ros_planning_interface

@@ -1,0 +1,11 @@
+<!-- behavior_trees/berryNamedPoseTest1.xml -->
+<root main_tree_to_execute="NamedPoseMain">
+  <BehaviorTree ID="NamedPoseMain">
+    <Sequence name="Go_Ready_Basket_Home">
+      <!-- 동일한 노드 타입에 pose 인풋 포트만 다르게 넘김 -->
+      <MoveToNamedPose pose="ready"/>
+      <MoveToNamedPose pose="basket"/>
+      <MoveToNamedPose pose="home"/>
+    </Sequence>
+  </BehaviorTree>
+</root>
