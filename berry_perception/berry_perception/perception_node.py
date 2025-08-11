@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-import rclpy, math, cv2, torch, numpy as np, os, sys
+import rclpy, math, cv2, torch, numpy as np, os, sys, time
 from rclpy.node            import Node
-from rclpy.action          import ActionServer
+from rclpy.action          import ActionServer, GoalResponse, CancelResponse
 from sensor_msgs.msg       import Image, CameraInfo
 from geometry_msgs.msg     import TransformStamped, PoseStamped, Point, Quaternion
 from visualization_msgs.msg import Marker
@@ -9,7 +9,8 @@ from tf2_ros               import StaticTransformBroadcaster, Buffer, TransformL
 import tf_transformations   as tft
 from cv_bridge             import CvBridge
 from ultralytics           import YOLO
-from berry_interface.action import DetectStrawberry, GripperControl
+from berry_interface.action import DetectStrawberry, GripperControl, VisualServoDetect
+from berry_interface.msg    import DetectionBBox
 from std_msgs.msg import Int8
 
 from ament_index_python.packages import get_package_share_directory
@@ -30,6 +31,8 @@ class PerceptionNode(Node):
         # ────── Parameters ───────────────────────────────────────────
         self.declare_parameter('camera_frame', 'camera_link')
         self.declare_parameter('eef_frame',     'link5')
+        self.declare_parameter('rgb_camera_frame', 'rgb_cam')   # USB 카메라 frame id
+        self.declare_parameter('rgb_cam_index', 0)              # 기본 OpenCV index
         # self.declare_parameter('camera_to_eef', [0.0, 0.08, 0.045,  math.pi/180*30, -math.pi/2, -math.pi/2]) # xyz + rpy
         self.declare_parameter('camera_to_eef', [0.035, 0.09, 0.045,  math.pi/180*0, -math.pi/2, -math.pi/2]) # xyz + rpy
         cam2eef = self.get_parameter('camera_to_eef').value
@@ -55,6 +58,15 @@ class PerceptionNode(Node):
         # RViz marker publisher
         self.marker_pub = self.create_publisher(Marker, 'strawberry_mark',  10)
         self.appr_pub   = self.create_publisher(Marker, 'approach_mark',    10)
+        # ── Visual Servo 결과/디버그 토픽 ─────────────────────
+        self.vs_det_pub_rgb   = self.create_publisher(DetectionBBox, '/visual_servo/rgb/detection',   10)
+        self.vs_det_pub_rgbd  = self.create_publisher(DetectionBBox, '/visual_servo/rgbd/detection',  10)
+        self.vs_img_pub_rgb   = self.create_publisher(Image,        '/visual_servo/rgb/debug_image',  10)
+        self.vs_img_pub_rgbd  = self.create_publisher(Image,        '/visual_servo/rgbd/debug_image', 10)
+ 
+        # ── 간단 트래킹(프레임 간 동일 딸기 유지) ─────────────────
+        self._prev_bbox_rgb  = None   # [x1,y1,x2,y2]
+        self._prev_bbox_rgbd = None
 
         # ────── YOLOv8 초기화 ───────────────────────────────────────
         pkg_share  = get_package_share_directory('berry_perception')
@@ -70,6 +82,23 @@ class PerceptionNode(Node):
         
         self._grip_server = ActionServer(                     # 🔸 추가
             self, GripperControl,  'gripper_command', self.gripper_cb)
+
+        # ────── Visual Servoing Detector Action ────────────────────
+        self._vs_busy      = False
+        self._vs_active    = False
+        self._vs_canceled  = False
+        self._vs_timer     = None
+        self._vs_infer_busy = False
+        self._vs_use_rgbd  = False
+        self._vs_use_rgb   = False
+        self._vs_target_hz = 10.0
+        self._vs_toggle    = 0     # 0: rgb → 1: rgbd (교차)
+        self._rgb_cap      = None  # OpenCV VideoCapture
+        self._vs_server = ActionServer(
+            self, VisualServoDetect, 'visual_servo_detect',
+            execute_callback=self.exec_vs,
+            goal_callback=self.vs_goal_cb,
+            cancel_callback=self.vs_cancel_cb)
 
         # ────── Gripper Command 토픽 (2 Hz) ───────────────────────
         self.grip_pub   = self.create_publisher(Int8, '/gripper_cmd', 10)
@@ -232,30 +261,6 @@ class PerceptionNode(Node):
 
         st_base = (mat_cam2base @ p_cam)[:3]            # 딸기 위치(base)
 
-        # # ② link4 z축으로 0.04 m 이동
-        # tf_link4 = self.tfb.lookup_transform('base_link', 'link4', rclpy.time.Time())
-        # R_link4  = tft.quaternion_matrix((tf_link4.transform.rotation.x,
-        #                                   tf_link4.transform.rotation.y,
-        #                                   tf_link4.transform.rotation.z,
-        #                                   tf_link4.transform.rotation.w))
-        # z_axis   = R_link4[:3, 2]
-        # appr_pos = st_base + 0.04 * z_axis
-
-        # # ③ link5 원점 → 딸기 벡터 방향으로 offset_z 만큼 당겨오기
-        # tf_link5  = self.tfb.lookup_transform('base_link', 'link5', rclpy.time.Time())
-        # link5_org = np.array([tf_link5.transform.translation.x,
-        #                       tf_link5.transform.translation.y,
-        #                       tf_link5.transform.translation.z])
-        # vec       = st_base - link5_org
-        # vec_norm  = vec / np.linalg.norm(vec)
-        # appr_pos  = appr_pos - offset_z * vec_norm
-
-        # ② 접근점 계산 (필수: link4의 XY 평면으로 사영한 벡터 사용)
-        #    - vec = (딸기 - link5 원점)
-        #    - vec 을 link4의 XY 평면(법선 = link4 z축)으로 사영 → v_proj
-        #    - 최종 접근점 = st_base + 0.04 * z4  -  offset_z * normalize(v_proj)
-        #
-        #    주의: 사영 벡터 크기가 너무 작으면(link4 z축과 거의 평행) link4 x축을 대체 방향으로 사용
         tf_link4 = self.tfb.lookup_transform('base_link', 'link4', rclpy.time.Time())
         R_link4  = tft.quaternion_matrix((
             tf_link4.transform.rotation.x,
@@ -287,40 +292,7 @@ class PerceptionNode(Node):
 
         # 최종 접근점: 사영된 평면 방향으로 offset, 그리고 link4 z축으로 0.04 상승
         appr_pos = st_base + 0.02 * z4 - offset_z * v_dir
-        # # ④ EEF orientation: x-axis를 vec 방향으로 정렬
-        # x_axis = vec_norm
-        # z_ref  = np.array([0.0, 0.0, 1.0])
-        # y_axis = np.cross(z_ref, x_axis)
-        # if np.linalg.norm(y_axis) < 1e-4:
-        #     y_axis = np.array([0.0, 1.0, 0.0])
-        # y_axis /= np.linalg.norm(y_axis)
-        # z_axis_eef = np.cross(x_axis, y_axis)
-        # # R_eef = np.eye(4)
-        # # R_eef[:3, 0] = x_axis
-        # # R_eef[:3, 1] = y_axis
-        # # R_eef[:3, 2] = z_axis_eef
-        # # q_eef = tft.quaternion_from_matrix(R_eef)
-
-        # # --- 축 재매핑 ---
-        # # 요구사항:
-        # #   현재 x축 → z축,  y축 → x축,  z축 → y축
-        # # 즉, new_x = old_y, new_y = old_z, new_z = old_x
-        # R_eef = np.eye(4)
-        # # col0(x) := old y
-        # R_eef[:3, 0] = y_axis
-        # # col1(y) := old z
-        # R_eef[:3, 1] = z_axis_eef
-        # # col2(z) := old x
-        # R_eef[:3, 2] = x_axis
-        # q_eef = tft.quaternion_from_matrix(R_eef)
-
-        # ④ EEF orientation (y축 고정):
-        #    - link5의 y축은 유지
-        #    - (딸기 - link5) 벡터를 link5의 XZ 평면에 사영
-        #    - 사영된 벡터 방향으로 z축을 정렬
-        #    - x축은 y × z로 직교화(우수좌법 유지)
-        #
-        #    참고: link5의 현재 축은 R_link5의 컬럼 벡터
+        
         R_link5 = tft.quaternion_matrix((
             tf_link5.transform.rotation.x,
             tf_link5.transform.rotation.y,
@@ -427,7 +399,408 @@ class PerceptionNode(Node):
         msg = Int8(data=self._grip_val)
         self.grip_pub.publish(msg)
 
+    # ===================== Visual Servo Detector =====================
+    def vs_goal_cb(self, goal_request):
+        if self._vs_busy or self._vs_active:
+            self.get_logger().warn("[vs_goal_cb] busy → reject new visual-servo goal")
+            return GoalResponse.REJECT
+        self._vs_busy = True
+        self.get_logger().info("[vs_goal_cb] ACCEPT visual-servo goal")
+        return GoalResponse.ACCEPT
+
+    def vs_cancel_cb(self, cancel_request):
+        self.get_logger().info("[vs_cancel_cb] CANCEL request received → ACCEPT")
+        self._vs_canceled = True
+        self._vs_active   = False
+        self._vs_stop_streams()
+        return CancelResponse.ACCEPT
+
+    async def exec_vs(self, goal_handle):
+        """Action body: start streaming until canceled."""
+        req = goal_handle.request
+        self._vs_canceled = False
+        self._vs_active   = True
+        self._vs_use_rgbd = bool(req.use_rgbd)
+        self._vs_use_rgb  = bool(req.use_rgb)
+        self._vs_target_hz = float(req.hz) if req.hz > 0.0 else 10.0
+        self._vs_target_hz = max(0.5, min(self._vs_target_hz, 30.0))  # 안전 클램프
+        rgb_index = int(req.rgb_cam_index) if req.rgb_cam_index != 0 else \
+                    int(self.get_parameter('rgb_cam_index').get_parameter_value().integer_value)
+
+        if not (self._vs_use_rgbd or self._vs_use_rgb):
+            self.get_logger().error("[exec_vs] both use_rgbd/use_rgb are False → abort")
+            goal_handle.abort()
+            self._vs_busy = False
+            return VisualServoDetect.Result(success=False, message="No camera selected")
+
+        self._vs_toggle = 0
+        self._vs_start_streams(rgb_index)
+        self._vs_start_timer()
+        self.get_logger().info(f"[exec_vs] ▶ START (rgbd={self._vs_use_rgbd}, rgb={self._vs_use_rgb}, hz={self._vs_target_hz:.1f})")
+
+        try:
+            while rclpy.ok() and self._vs_active:
+                if goal_handle.is_cancel_requested:
+                    self.get_logger().info("[exec_vs] ⛔ CANCEL requested → stopping stream")
+                    self._vs_canceled = True
+                    self._vs_active   = False
+                    break
+                time.sleep(0.1)
+        finally:
+            self._vs_stop_streams()
+            self._vs_busy = False
+        if self._vs_canceled:
+            goal_handle.canceled()
+            return VisualServoDetect.Result(success=False, message="Canceled")
+        else:
+            goal_handle.succeed()
+            return VisualServoDetect.Result(success=True, message="Stream stopped")
+
+    # ---- helpers ----
+    def _vs_start_streams(self, rgb_index: int):
+        if self._vs_use_rgb:
+            if self._rgb_cap is not None:
+                try:
+                    self._rgb_cap.release()
+                except Exception:
+                    pass
+            self._rgb_cap = cv2.VideoCapture(rgb_index)
+            if not self._rgb_cap.isOpened():
+                self.get_logger().error(f"[vs] cannot open RGB camera index {rgb_index}")
+                self._vs_use_rgb = False
+
+    def _vs_stop_streams(self):
+        if self._vs_timer is not None:
+            try:
+                self._vs_timer.cancel()
+            except Exception:
+                pass
+            self._vs_timer = None
+        if self._rgb_cap is not None:
+            try:
+                self._rgb_cap.release()
+            except Exception:
+                pass
+            self._rgb_cap = None
+
+    def _vs_start_timer(self):
+        # 둘 다 True면 교차 실행: 타이머 주기 = 0.5/hz
+        if self._vs_use_rgb and self._vs_use_rgbd:
+            period = 0.5 / self._vs_target_hz
+        else:
+            period = 1.0 / self._vs_target_hz
+        self._vs_timer = self.create_timer(period, self._vs_tick)
+
+    def _vs_tick(self):
+        # if not self._vs_active or self._vs_infer_busy:
+        # 타이머 콜백은 어떤 예외도 밖으로 던지지 않도록 방어
+        try:
+            self._vs_tick_impl()
+        except Exception as e:
+            self.get_logger().error(f"[vs_tick] exception: {e}")
+
+    def _vs_tick_impl(self):
+        if not self._vs_active or self._vs_infer_busy:
+            return
+        # 어떤 카메라를 이번 턴에 처리할지 결정
+        cam = None
+        if self._vs_use_rgb and self._vs_use_rgbd:
+            cam = 'rgb' if self._vs_toggle == 0 else 'rgbd'
+            self._vs_toggle ^= 1
+        elif self._vs_use_rgb:
+            cam = 'rgb'
+        elif self._vs_use_rgbd:
+            cam = 'rgbd'
+        else:
+            return
+        self._vs_infer_busy = True
+        try:
+            if cam == 'rgb':
+                self._process_rgb_frame()
+            else:
+                self._process_rgbd_frame()
+        finally:
+            self._vs_infer_busy = False
+
+    # ----------------- YOLO 결과 유틸 ------------------------------
+    @staticmethod
+    def _iou(a, b):
+        # a,b: [x1,y1,x2,y2]
+        ax1, ay1, ax2, ay2 = a; bx1, by1, bx2, by2 = b
+        inter_x1 = max(ax1, bx1); inter_y1 = max(ay1, by1)
+        inter_x2 = min(ax2, bx2); inter_y2 = min(ay2, by2)
+        iw = max(0, inter_x2 - inter_x1); ih = max(0, inter_y2 - inter_y1)
+        inter = iw * ih
+        a_area = max(0, ax2 - ax1) * max(0, ay2 - ay1)
+        b_area = max(0, bx2 - bx1) * max(0, by2 - by1)
+        union = a_area + b_area - inter + 1e-9
+        return inter / union
+
+    @staticmethod
+    def _center_distance(a, b):
+        ax = 0.5 * (a[0] + a[2]); ay = 0.5 * (a[1] + a[3])
+        bx = 0.5 * (b[0] + b[2]); by = 0.5 * (b[1] + b[3])
+        dx = ax - bx; dy = ay - by
+        return (dx*dx + dy*dy) ** 0.5
+
+    def _get_all_boxes(self, results):
+        """returns (xyxy: Nx4 int list, conf: list[float]) or ([],[])"""
+        if (not results) or (results[0].boxes is None) or (len(results[0].boxes) == 0):
+            return [], []
+        b = results[0].boxes
+        try:
+            xyxy = b.xyxy.cpu().numpy()
+            conf = b.conf.cpu().numpy()
+        except Exception:
+            xyxy = b.xyxy.numpy() if hasattr(b.xyxy, "numpy") else np.array(b.xyxy)
+            conf = b.conf.numpy() if hasattr(b.conf, "numpy") else np.array(b.conf)
+        xyxy = xyxy.astype(int).tolist()
+        conf = [float(c) for c in conf.tolist()]
+        return xyxy, conf
+
+    def _choose_track(self, prev_bbox, xyxy_list, conf_list):
+        """prev가 있으면 IoU 최대(>0.1 우선), 아니면 conf 최대. IoU 낮으면 센터거리 최소."""
+        if not xyxy_list:
+            return None
+        if prev_bbox is None:
+            return int(np.argmax(conf_list))
+        # IoU 기준
+        ious = [self._iou(prev_bbox, bb) for bb in xyxy_list]
+        best_iou = max(ious); i_best = int(np.argmax(ious))
+        if best_iou > 0.1:
+            return i_best
+        # 센터 거리
+        dists = [self._center_distance(prev_bbox, bb) for bb in xyxy_list]
+        return int(np.argmin(dists))
+
+    def _best_box(self, results):
+        # if not results or not results[0].boxes:
+        #     return None, None
+        # boxes = results[0].boxes
+        # idx = int(boxes.conf.argmax())
+        # box = boxes[idx]
+        # conf = float(boxes.conf[idx].item())
+        # x1, y1, x2, y2 = map(int, box.xyxy[0])
+        # return (x1, y1, x2, y2), conf
+
+        if (not results) or (results[0].boxes is None) or (len(results[0].boxes) == 0):
+            return None, None, None
+        boxes = results[0].boxes
+        # best index by confidence
+        try:
+            idx = int(torch.argmax(boxes.conf).item())
+        except Exception:
+            idx = int(np.argmax(boxes.conf.cpu().numpy()))
+        x1, y1, x2, y2 = map(int, results[0].boxes.xyxy[idx].tolist())
+        conf = float(results[0].boxes.conf[idx].item())
+        return (x1, y1, x2, y2), conf, idx
+
+    def _extract_kpts(self, results, idx):
+        """
+        returns: kpt_x(list[float]), kpt_y(list[float]), kpt_conf(list[float] or [])
+        """
+        try:
+            rk = results[0].keypoints
+        except Exception:
+            rk = None
+        if rk is None or rk.xy is None:
+            return [], [], []
+        # shape: (N, K, 2)
+        try:
+            xy = rk.xy[idx].cpu().numpy()
+        except Exception:
+            xy = rk.xy[idx]
+        kpx = [float(p[0]) for p in xy]
+        kpy = [float(p[1]) for p in xy]
+        kpc = []
+        if hasattr(rk, "conf") and rk.conf is not None:
+            try:
+                confv = rk.conf[idx].cpu().numpy().tolist()
+            except Exception:
+                confv = rk.conf[idx].tolist()
+            kpc = [float(c) for c in confv]
+        return kpx, kpy, kpc
+
+    @staticmethod
+    def _robust_depth_at(u_px: float, v_px: float, depth_np: np.ndarray) -> float:
+        """주변 3x3 윈도우에서 robust 하게 깊이(m) 추정. 없으면 NaN."""
+        if depth_np is None:
+            return float('nan')
+        h, w = depth_np.shape[:2]
+        u = int(round(u_px)); v = int(round(v_px))
+        u = max(0, min(w-1, u)); v = max(0, min(h-1, v))
+        x0 = max(0, u-1); x1 = min(w, u+2)
+        y0 = max(0, v-1); y1 = min(h, v+2)
+        win = depth_np[y0:y1, x0:x1].reshape(-1)
+        vals = win[(win > 0) & np.isfinite(win)]
+        if vals.size == 0:
+            return float('nan')
+        sorted_vals = np.sort(vals)
+        q25_len = max(1, int(len(sorted_vals) * 0.25))
+        return float(np.mean(sorted_vals[:q25_len]))
+
+    def _process_rgb_frame(self):
+        if self._rgb_cap is None:
+            return
+        ret, frame = self._rgb_cap.read()
+        if not ret or frame is None:
+            self.get_logger().warn_throttle(5000, "[vs/rgb] failed to read frame")
+            return
+        results = self.model.predict(source=frame, conf=0.4, save=False, verbose=False)
+        # bbox, conf, idx = self._best_box(results)
+        # 다중 박스 중 이전 프레임과 일관성 유지하도록 선택
+        xyxy_list, conf_list = self._get_all_boxes(results)
+        idx = self._choose_track(self._prev_bbox_rgb, xyxy_list, conf_list)
+        stamp = self.get_clock().now().to_msg()
+        # kpx, kpy, kpc = self._extract_kpts(results, idx) if idx is not None else ([], [], [])
+        # if bbox is not None:
+        #     x1, y1, x2, y2 = bbox
+        kpx, kpy, kpc = self._extract_kpts(results, idx) if idx is not None else ([], [], [])
+        if idx is not None:
+            x1, y1, x2, y2 = xyxy_list[idx]
+            conf = conf_list[idx]
+            cx, cy = (x1 + x2) * 0.5, (y1 + y2) * 0.5
+            # draw
+            cv2.rectangle(frame, (x1, y1), (x2, y2), (0,255,0), 2)
+            cv2.circle(frame, (int(cx), int(cy)), 3, (0,0,255), -1)
+            cv2.putText(frame, f"{conf:.2f}", (x1, max(0, y1-5)), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255,255,255), 1)
+            # draw keypoints
+            for i in range(len(kpx)):
+                u, v = int(kpx[i]), int(kpy[i])
+                if u > 0 and v > 0:
+                    cv2.circle(frame, (u, v), 3, (0, 0, 255), -1)
+            # publish msg
+            msg = DetectionBBox()
+            msg.header.stamp = stamp
+            msg.header.frame_id = self.get_parameter('rgb_camera_frame').value
+            msg.camera_name = "rgb"
+            msg.conf = float(conf)
+            # msg.x1, msg.y1, msg.x2, msg.y2 = x1, y1, x2, y2
+            msg.x1, msg.y1, msg.x2, msg.y2 = int(x1), int(y1), int(x2), int(y2)
+            msg.cx, msg.cy = float(cx), float(cy)
+            msg.depth_m = float('nan')
+            msg.kpt_count = int(len(kpx))
+            msg.kpt_x = [float(x) for x in kpx]
+            msg.kpt_y = [float(y) for y in kpy]
+            if len(kpc) == len(kpx):
+                msg.kpt_conf = [float(c) for c in kpc]
+            else:
+                msg.kpt_conf = [float(-1.0)] * msg.kpt_count
+            msg.kpt_cam_xyz = []   # RGB에는 3D 없음
+
+            self.vs_det_pub_rgb.publish(msg)
+        # publish debug image anyway
+        img_msg = self.bridge.cv2_to_imgmsg(frame, encoding='bgr8')
+        img_msg.header.stamp = stamp
+        img_msg.header.frame_id = self.get_parameter('rgb_camera_frame').value
+        self.vs_img_pub_rgb.publish(img_msg)
+
+    def _process_rgbd_frame(self):
+        if self.rgb_img is None or self.depth_img is None or self.cam_info is None:
+            self.get_logger().debug("[vs/rgbd] waiting for rgb/depth/camera_info")
+            return
+        cv_img = self.bridge.imgmsg_to_cv2(self.rgb_img, 'bgr8')
+        results = self.model.predict(source=cv_img, conf=0.4, save=False, verbose=False)
+        # bbox, conf, idx = self._best_box(results)
+        # kpx, kpy, kpc = self._extract_kpts(results, idx) if idx is not None else ([], [], [])
+        # bbox, conf = self._best_box(results)
+        # 다중 박스 중 이전 프레임과 일관성 유지하도록 선택
+        xyxy_list, conf_list = self._get_all_boxes(results)
+        idx = self._choose_track(self._prev_bbox_rgbd, xyxy_list, conf_list)
+        kpx, kpy, kpc = self._extract_kpts(results, idx) if idx is not None else ([], [], [])
+        # depth calc
+        # if bbox is not None:
+        #     x1, y1, x2, y2 = bbox
+        if idx is not None:
+            x1, y1, x2, y2 = xyxy_list[idx]
+            conf = conf_list[idx]
+            h, w = cv_img.shape[:2]
+            x1c = max(0, min(w-1, x1)); x2c = max(0, min(w-1, x2))
+            y1c = max(0, min(h-1, y1)); y2c = max(0, min(h-1, y2))
+            cxp, cyp = (x1c + x2c) * 0.5, (y1c + y2c) * 0.5
+            # depth_np = self.bridge.imgmsg_to_cv2(self.depth_img, 'passthrough').astype(np.float32) / 1000.0
+            # win = depth_np[y1c:y2c+1, x1c:x2c+1].reshape(-1)
+            # vals = win[(win > 0) & np.isfinite(win)]
+            # depth_m = float('nan')
+            # if vals.size > 0:
+            #     med  = np.median(vals)
+            #     mad  = np.median(np.abs(vals - med))
+            #     thresh = 3 * 1.4826 * mad if mad > 0 else np.inf
+            #     inliers = vals[np.abs(vals - med) < thresh]
+            #     sorted_vals = np.sort(inliers)
+            #     q25_len = max(1, int(len(sorted_vals) * 0.25))
+            #     depth_m = float(np.mean(sorted_vals[:q25_len]))
+            # 경량화된 depth: bbox 중앙 3x3 median
+            depth_np = self.bridge.imgmsg_to_cv2(self.depth_img, 'passthrough').astype(np.float32) / 1000.0
+            depth_m = self._robust_depth_at(cxp, cyp, depth_np)
+            # draw
+            cv2.rectangle(cv_img, (x1c, y1c), (x2c, y2c), (0,255,0), 2)
+            cv2.circle(cv_img, (int(cxp), int(cyp)), 3, (0,0,255), -1)
+            cv2.putText(cv_img, f"{conf:.2f}, {depth_m:.3f}m", (x1c, max(0, y1c-5)),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255,255,255), 1)
+            # draw keypoints & compute per-kp depth/3D
+            fx = self.cam_info.k[0];  fy = self.cam_info.k[4]
+            cx0 = self.cam_info.k[2]; cy0 = self.cam_info.k[5]
+            kpt_points_3d = []
+            for i in range(len(kpx)):
+                u, v = float(kpx[i]), float(kpy[i])
+                if u <= 0 or v <= 0:
+                    # invalid pixel → NaN
+                    kpt_points_3d.append(Point(x=float('nan'), y=float('nan'), z=float('nan')))
+                    continue
+                d = self._robust_depth_at(u, v, depth_np)
+                if not np.isfinite(d):
+                    kpt_points_3d.append(Point(x=float('nan'), y=float('nan'), z=float('nan')))
+                    continue
+                # optical frame (REP-103): x→right, y→down, z→forward
+                x_opt = (u - cx0) * d / fx
+                y_opt = (v - cy0) * d / fy
+                z_opt = d
+                # optical → body(camera_link): X=+z, Y=−x, Z=−y
+                X =  z_opt
+                Y = -x_opt
+                Z = -y_opt
+                kpt_points_3d.append(Point(x=float(X), y=float(Y), z=float(Z)))
+                # overlay keypoint dot
+                cv2.circle(cv_img, (int(u), int(v)), 3, (0, 0, 255), -1)
+            # publish msg
+            msg = DetectionBBox()
+            msg.header = self.rgb_img.header
+            msg.camera_name = "rgbd"
+            msg.conf = float(conf)
+            msg.x1, msg.y1, msg.x2, msg.y2 = int(x1c), int(y1c), int(x2c), int(y2c)
+            msg.cx, msg.cy = float(cxp), float(cyp)
+            msg.depth_m = depth_m
+            msg.kpt_count = int(len(kpx))
+            msg.kpt_x = [float(x) for x in kpx]
+            msg.kpt_y = [float(y) for y in kpy]
+            if len(kpc) == len(kpx):
+                msg.kpt_conf = [float(c) for c in kpc]
+            else:
+                msg.kpt_conf = [float(-1.0)] * msg.kpt_count
+            msg.kpt_cam_xyz = kpt_points_3d
+            self.vs_det_pub_rgbd.publish(msg)
+            # prev 갱신
+            self._prev_bbox_rgbd = [int(x1c), int(y1c), int(x2c), int(y2c)]
+        else:
+            self._prev_bbox_rgbd = None
+        # debug image
+        dbg = self.bridge.cv2_to_imgmsg(cv_img, encoding='bgr8')
+        dbg.header = self.rgb_img.header
+        self.vs_img_pub_rgbd.publish(dbg)
+
 def main():
+    # rclpy.init()
+    # rclpy.spin(PerceptionNode())
+    # rclpy.shutdown()
+    import rclpy.executors as execs
     rclpy.init()
-    rclpy.spin(PerceptionNode())
-    rclpy.shutdown()
+    node = PerceptionNode()
+    executor = execs.MultiThreadedExecutor(num_threads=4)
+    executor.add_node(node)
+    try:
+        executor.spin()
+    finally:
+        node.destroy_node()
+        rclpy.shutdown()
+

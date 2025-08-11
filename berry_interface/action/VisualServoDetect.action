@@ -1,0 +1,12 @@
+# VisualServoDetect.action
+# Visual servoing detector stream starter
+# Goal: choose camera(s) and target streaming rate
+bool    use_rgbd          # use RGBD camera stream (from ROS topics)
+bool    use_rgb           # use USB RGB camera via OpenCV
+float32 hz                # desired per-camera Hz (e.g., 10.0). If both true, node alternates every 1/(2*hz).
+int32   rgb_cam_index     # OpenCV camera index for RGB (default 0 if unset by client)
+---
+bool   success
+string message
+---
+string status
