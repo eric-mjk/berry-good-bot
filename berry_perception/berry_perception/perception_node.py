@@ -31,13 +31,28 @@ class PerceptionNode(Node):
         # ────── Parameters ───────────────────────────────────────────
         self.declare_parameter('camera_frame', 'camera_link')
         self.declare_parameter('eef_frame',     'link5')
-        self.declare_parameter('rgb_camera_frame', 'rgb_cam')   # USB 카메라 frame id
-        self.declare_parameter('rgb_cam_index', 0)              # 기본 OpenCV index
+        self.declare_parameter('rgb_camera_frame', 'rgb_cam')   # (사용 안 해도 무방)
+        self.declare_parameter('rgb_cam_index', 0)              # (사용 안 해도 무방)
+
+        # 상단 카메라(기존)
         # self.declare_parameter('camera_to_eef', [0.0, 0.08, 0.045,  math.pi/180*30, -math.pi/2, -math.pi/2]) # xyz + rpy
         self.declare_parameter('camera_to_eef', [0.035, 0.09, 0.045,  math.pi/180*0, -math.pi/2, -math.pi/2]) # xyz + rpy
+        self.declare_parameter('camera_tilt_deg', 35.0)  # 상단 카메라 보정 틸트
+
+        # 하단(아래) 카메라 TF 추가
+        self.declare_parameter('bottom_camera_frame', 'bottom_camera_link')
+        # 기본값은 예시이며 실제 로봇에 맞게 launch/YAML로 오버라이드하세요.
+        self.declare_parameter('bottom_camera_to_eef', [0.0, -0.09, 0.0365, 0.0, -math.pi/2, -math.pi/2]) # xyz + rpy
+        self.declare_parameter('bottom_camera_tilt_deg', -35.0)  # 필요 시 틸트 보정
+
         cam2eef = self.get_parameter('camera_to_eef').value
         self.logger.debug(f"[PARAM] camera_to_eef = {cam2eef}")
-        self.publish_static_tf(cam2eef)
+
+        self.publish_static_tf(cam2eef, tilt_deg=float(self.get_parameter('camera_tilt_deg').value))
+        bot_cam2eef = self.get_parameter('bottom_camera_to_eef').value
+        self.logger.debug(f"[PARAM] bottom_camera_to_eef = {bot_cam2eef}")
+        self.publish_bottom_tf(bot_cam2eef, tilt_deg=float(self.get_parameter('bottom_camera_tilt_deg').value))
+
 
         # ────── Subscribers / utils ─────────────────────────────────
         self.bridge   = CvBridge()
@@ -59,11 +74,8 @@ class PerceptionNode(Node):
         self.marker_pub = self.create_publisher(Marker, 'strawberry_mark',  10)
         self.appr_pub   = self.create_publisher(Marker, 'approach_mark',    10)
         # ── Visual Servo 결과/디버그 토픽 ─────────────────────
-        self.vs_det_pub_rgb   = self.create_publisher(DetectionBBox, '/visual_servo/rgb/detection',   10)
-        self.vs_det_pub_rgbd  = self.create_publisher(DetectionBBox, '/visual_servo/rgbd/detection',  10)
-        self.vs_img_pub_rgb   = self.create_publisher(Image,        '/visual_servo/rgb/debug_image',  10)
-        self.vs_img_pub_rgbd  = self.create_publisher(Image,        '/visual_servo/rgbd/debug_image', 10)
- 
+        # (VisualServoDetect 관련 퍼블리셔 제거)
+
         # ── 간단 트래킹(프레임 간 동일 딸기 유지) ─────────────────
         self._prev_bbox_rgb  = None   # [x1,y1,x2,y2]
         self._prev_bbox_rgbd = None
@@ -83,30 +95,14 @@ class PerceptionNode(Node):
         self._grip_server = ActionServer(                     # 🔸 추가
             self, GripperControl,  'gripper_command', self.gripper_cb)
 
-        # ────── Visual Servoing Detector Action ────────────────────
-        self._vs_busy      = False
-        self._vs_active    = False
-        self._vs_canceled  = False
-        self._vs_timer     = None
-        self._vs_infer_busy = False
-        self._vs_use_rgbd  = False
-        self._vs_use_rgb   = False
-        self._vs_target_hz = 10.0
-        self._vs_toggle    = 0     # 0: rgb → 1: rgbd (교차)
-        self._rgb_cap      = None  # OpenCV VideoCapture
-        self._vs_server = ActionServer(
-            self, VisualServoDetect, 'visual_servo_detect',
-            execute_callback=self.exec_vs,
-            goal_callback=self.vs_goal_cb,
-            cancel_callback=self.vs_cancel_cb)
-
         # ────── Gripper Command 토픽 (2 Hz) ───────────────────────
         self.grip_pub   = self.create_publisher(Int8, '/gripper_cmd', 10)
         self._grip_val  = 1                              # 기본 열림
         self.create_timer(0.5, self._tick_grip)         # 2 Hz
 
     # ----------------- Static TF ----------------------------------
-    def publish_static_tf(self, xyzrpy):
+    def publish_static_tf(self, xyzrpy, tilt_deg: float = 35.0):
+        """상단 카메라 정적 TF publish (parent=eef_frame, child=camera_frame)."""
         br = StaticTransformBroadcaster(self)
         t  = TransformStamped()
         t.header.stamp    = self.get_clock().now().to_msg()
@@ -119,11 +115,30 @@ class PerceptionNode(Node):
         # ── (1) 원래 RPY → 행렬 ────────────────────────────────
         base_rot = tft.euler_matrix(*xyzrpy[3:])          # 4×4
 
-        # ── (2) 보정: 초록(Y)축 기준 +30° 앞쪽으로 기울이기 ──
-        tilt_rad = math.radians(35.0)                     # 필요 시 −값으로 바꿔보세요
+        # ── (2) 보정: 초록(Y)축 기준 tilt_deg 만큼 앞쪽으로 기울이기 ──
+        tilt_rad = math.radians(float(tilt_deg))
         corr_mat = tft.rotation_matrix(tilt_rad, (0, 1, 0))
 
         # ── (3) 두 행렬 곱 → 최종 쿼터니언 ────────────────────
+        final_q  = tft.quaternion_from_matrix(
+                      tft.concatenate_matrices(base_rot, corr_mat))
+        t.transform.rotation = Quaternion(
+           x=final_q[0], y=final_q[1], z=final_q[2], w=final_q[3])
+        br.sendTransform(t)
+
+    def publish_bottom_tf(self, xyzrpy, tilt_deg: float = 0.0):
+        """하단(아래) 카메라 정적 TF publish (parent=eef_frame, child=bottom_camera_frame)."""
+        br = StaticTransformBroadcaster(self)
+        t  = TransformStamped()
+        t.header.stamp    = self.get_clock().now().to_msg()
+        t.header.frame_id = self.get_parameter('eef_frame').value
+        t.child_frame_id  = self.get_parameter('bottom_camera_frame').value
+        t.transform.translation.x, t.transform.translation.y, t.transform.translation.z = xyzrpy[:3]
+        # RPY → 행렬
+        base_rot = tft.euler_matrix(*xyzrpy[3:])
+        # 보정 틸트 (필요 시)
+        tilt_rad = math.radians(float(tilt_deg))
+        corr_mat = tft.rotation_matrix(tilt_rad, (0, 1, 0))
         final_q  = tft.quaternion_from_matrix(
                       tft.concatenate_matrices(base_rot, corr_mat))
         t.transform.rotation = Quaternion(
@@ -399,128 +414,6 @@ class PerceptionNode(Node):
         msg = Int8(data=self._grip_val)
         self.grip_pub.publish(msg)
 
-    # ===================== Visual Servo Detector =====================
-    def vs_goal_cb(self, goal_request):
-        if self._vs_busy or self._vs_active:
-            self.get_logger().warn("[vs_goal_cb] busy → reject new visual-servo goal")
-            return GoalResponse.REJECT
-        self._vs_busy = True
-        self.get_logger().info("[vs_goal_cb] ACCEPT visual-servo goal")
-        return GoalResponse.ACCEPT
-
-    def vs_cancel_cb(self, cancel_request):
-        self.get_logger().info("[vs_cancel_cb] CANCEL request received → ACCEPT")
-        self._vs_canceled = True
-        self._vs_active   = False
-        self._vs_stop_streams()
-        return CancelResponse.ACCEPT
-
-    async def exec_vs(self, goal_handle):
-        """Action body: start streaming until canceled."""
-        req = goal_handle.request
-        self._vs_canceled = False
-        self._vs_active   = True
-        self._vs_use_rgbd = bool(req.use_rgbd)
-        self._vs_use_rgb  = bool(req.use_rgb)
-        self._vs_target_hz = float(req.hz) if req.hz > 0.0 else 10.0
-        self._vs_target_hz = max(0.5, min(self._vs_target_hz, 30.0))  # 안전 클램프
-        rgb_index = int(req.rgb_cam_index) if req.rgb_cam_index != 0 else \
-                    int(self.get_parameter('rgb_cam_index').get_parameter_value().integer_value)
-
-        if not (self._vs_use_rgbd or self._vs_use_rgb):
-            self.get_logger().error("[exec_vs] both use_rgbd/use_rgb are False → abort")
-            goal_handle.abort()
-            self._vs_busy = False
-            return VisualServoDetect.Result(success=False, message="No camera selected")
-
-        self._vs_toggle = 0
-        self._vs_start_streams(rgb_index)
-        self._vs_start_timer()
-        self.get_logger().info(f"[exec_vs] ▶ START (rgbd={self._vs_use_rgbd}, rgb={self._vs_use_rgb}, hz={self._vs_target_hz:.1f})")
-
-        try:
-            while rclpy.ok() and self._vs_active:
-                if goal_handle.is_cancel_requested:
-                    self.get_logger().info("[exec_vs] ⛔ CANCEL requested → stopping stream")
-                    self._vs_canceled = True
-                    self._vs_active   = False
-                    break
-                time.sleep(0.1)
-        finally:
-            self._vs_stop_streams()
-            self._vs_busy = False
-        if self._vs_canceled:
-            goal_handle.canceled()
-            return VisualServoDetect.Result(success=False, message="Canceled")
-        else:
-            goal_handle.succeed()
-            return VisualServoDetect.Result(success=True, message="Stream stopped")
-
-    # ---- helpers ----
-    def _vs_start_streams(self, rgb_index: int):
-        if self._vs_use_rgb:
-            if self._rgb_cap is not None:
-                try:
-                    self._rgb_cap.release()
-                except Exception:
-                    pass
-            self._rgb_cap = cv2.VideoCapture(rgb_index)
-            if not self._rgb_cap.isOpened():
-                self.get_logger().error(f"[vs] cannot open RGB camera index {rgb_index}")
-                self._vs_use_rgb = False
-
-    def _vs_stop_streams(self):
-        if self._vs_timer is not None:
-            try:
-                self._vs_timer.cancel()
-            except Exception:
-                pass
-            self._vs_timer = None
-        if self._rgb_cap is not None:
-            try:
-                self._rgb_cap.release()
-            except Exception:
-                pass
-            self._rgb_cap = None
-
-    def _vs_start_timer(self):
-        # 둘 다 True면 교차 실행: 타이머 주기 = 0.5/hz
-        if self._vs_use_rgb and self._vs_use_rgbd:
-            period = 0.5 / self._vs_target_hz
-        else:
-            period = 1.0 / self._vs_target_hz
-        self._vs_timer = self.create_timer(period, self._vs_tick)
-
-    def _vs_tick(self):
-        # if not self._vs_active or self._vs_infer_busy:
-        # 타이머 콜백은 어떤 예외도 밖으로 던지지 않도록 방어
-        try:
-            self._vs_tick_impl()
-        except Exception as e:
-            self.get_logger().error(f"[vs_tick] exception: {e}")
-
-    def _vs_tick_impl(self):
-        if not self._vs_active or self._vs_infer_busy:
-            return
-        # 어떤 카메라를 이번 턴에 처리할지 결정
-        cam = None
-        if self._vs_use_rgb and self._vs_use_rgbd:
-            cam = 'rgb' if self._vs_toggle == 0 else 'rgbd'
-            self._vs_toggle ^= 1
-        elif self._vs_use_rgb:
-            cam = 'rgb'
-        elif self._vs_use_rgbd:
-            cam = 'rgbd'
-        else:
-            return
-        self._vs_infer_busy = True
-        try:
-            if cam == 'rgb':
-                self._process_rgb_frame()
-            else:
-                self._process_rgbd_frame()
-        finally:
-            self._vs_infer_busy = False
 
     # ----------------- YOLO 결과 유틸 ------------------------------
     @staticmethod
@@ -796,7 +689,7 @@ def main():
     import rclpy.executors as execs
     rclpy.init()
     node = PerceptionNode()
-    executor = execs.MultiThreadedExecutor(num_threads=4)
+    executor = execs.MultiThreadedExecutor(num_threads=2)
     executor.add_node(node)
     try:
         executor.spin()

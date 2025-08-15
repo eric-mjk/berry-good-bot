@@ -25,8 +25,11 @@ setup(
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
-            'perception_node   = berry_perception.perception_node:main',
-            'debug_cli         = berry_perception.debug_cli:main',
+            'perception_node      = berry_perception.perception_node:main',
+            'debug_cli            = berry_perception.debug_cli:main',
+            'bottom_cam_param_test= berry_perception.bottom_cam_param_test:main',
+            'visualServoing       = berry_perception.visualServoing:main',
+            'microsServoingPerceptionTest= berry_perception.microsServoingPerceptionTest:main',
         ],
     },
 )
