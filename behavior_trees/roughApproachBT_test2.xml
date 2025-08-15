@@ -3,8 +3,8 @@
   <BehaviorTree ID="RoughApproachMain">
     <Sequence name="RoughApproachSequence">
       <!-- 1) 미리 자세 -->
-      <!-- <MoveToNamedPose pose="ready"/>
-      <WaitRealRobotSync tolerance="0.01" stable_time="0.5" timeout="30.0"/> -->
+      <MoveToNamedPose pose="ready"/>
+      <WaitRealRobotSync tolerance="0.01" stable_time="0.5" timeout="30.0"/>
 
       <!-- 2) 탐지 → 접근점(base_link) 산출, 블랙보드에 저장 -->
       <DetectApproachPose offset_z="0.05"

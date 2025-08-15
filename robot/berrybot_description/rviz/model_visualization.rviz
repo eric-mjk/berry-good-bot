@@ -6,15 +6,12 @@ Panels:
       Expanded:
         - /Global Options1
         - /Status1
-        - /RobotModel1
-        - /TF1
         - /TF1/Frames1
         - /DepthCloud1/Auto Size1
-        - /Marker1
         - /Marker1/Topic1
-        - /MarkerArray1
+        - /Image3
       Splitter Ratio: 0.6088235378265381
-    Tree Height: 256
+    Tree Height: 246
   - Class: rviz_common/Selection
     Name: Selection
   - Class: rviz_common/Tool Properties
@@ -115,7 +112,11 @@ Visualization Manager:
       Frame Timeout: 15
       Frames:
         All Enabled: false
+        approach_target:
+          Value: true
         base_link:
+          Value: true
+        bottom_camera_link:
           Value: true
         camera_color_frame:
           Value: false
@@ -144,11 +145,15 @@ Visualization Manager:
       Show Names: false
       Tree:
         base_link:
+          approach_target:
+            {}
           link1:
             link2:
               link3:
                 link4:
                   link5:
+                    bottom_camera_link:
+                      {}
                     camera_link:
                       camera_color_frame:
                         camera_color_optical_frame:
@@ -201,7 +206,7 @@ Visualization Manager:
       Enabled: true
       Name: Marker
       Namespaces:
-        {}
+        berry: true
       Topic:
         Depth: 5
         Durability Policy: System Default
@@ -224,23 +229,11 @@ Visualization Manager:
         Reliability Policy: Reliable
         Value: /camera/camera/color/image_raw
       Value: true
-    - Class: rviz_default_plugins/MarkerArray
-      Enabled: true
-      Name: MarkerArray
-      Namespaces:
-        {}
-      Topic:
-        Depth: 5
-        Durability Policy: Volatile
-        History Policy: Keep Last
-        Reliability Policy: Reliable
-        Value: /approach_mark_array
-      Value: true
     - Class: rviz_default_plugins/Marker
       Enabled: true
       Name: Marker
       Namespaces:
-        {}
+        berry: true
       Topic:
         Depth: 5
         Durability Policy: Volatile
@@ -248,6 +241,23 @@ Visualization Manager:
         History Policy: Keep Last
         Reliability Policy: Reliable
         Value: /strawberry_mark
+      Value: true
+    - Class: rviz_default_plugins/Marker
+      Enabled: true
+      Name: Marker
+      Namespaces:
+        bot_ray: true
+        ibvs: true
+        ibvs_goal: true
+        tip: true
+        top_ray: true
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        Filter size: 10
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /ibvs_target_point
       Value: true
     - Class: rviz_default_plugins/Image
       Enabled: true
@@ -261,7 +271,21 @@ Visualization Manager:
         Durability Policy: Volatile
         History Policy: Keep Last
         Reliability Policy: Reliable
-        Value: /camera/camera/color/image_raw
+        Value: /ibvs/bottom/debug_image
+      Value: true
+    - Class: rviz_default_plugins/Image
+      Enabled: true
+      Max Value: 1
+      Median window: 5
+      Min Value: 0
+      Name: Image
+      Normalize Range: true
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /ibvs/top/debug_image
       Value: true
   Enabled: true
   Global Options:
@@ -309,35 +333,35 @@ Visualization Manager:
   Views:
     Current:
       Class: rviz_default_plugins/Orbit
-      Distance: 2.983348846435547
+      Distance: 1.052964210510254
       Enable Stereo Rendering:
         Stereo Eye Separation: 0.05999999865889549
         Stereo Focal Distance: 1
         Swap Stereo Eyes: false
         Value: false
       Focal Point:
-        X: 0.1957402527332306
-        Y: 0.06942646950483322
-        Z: 0.28697094321250916
+        X: 0.24524015188217163
+        Y: -0.058671530336141586
+        Z: 0.4333801567554474
       Focal Shape Fixed Size: true
       Focal Shape Size: 0.05000000074505806
       Invert Z Axis: false
       Name: Current View
       Near Clip Distance: 0.009999999776482582
-      Pitch: 0.7703976035118103
+      Pitch: 0.6003977060317993
       Target Frame: base_link
       Value: Orbit (rviz)
-      Yaw: 2.870417833328247
+      Yaw: 1.0222344398498535
     Saved: ~
 Window Geometry:
   Displays:
     collapsed: false
-  Height: 738
+  Height: 760
   Hide Left Dock: false
-  Hide Right Dock: true
+  Hide Right Dock: false
   Image:
     collapsed: false
-  QMainWindow State: 000000ff00000000fd00000004000000000000015600000244fc020000000cfb0000001200530065006c0065006300740069006f006e00000001e10000009b0000005c00fffffffb0000001e0054006f006f006c002000500072006f007000650072007400690065007302000001ed000001df00000185000000a3fb000000120056006900650077007300200054006f006f02000001df000002110000018500000122fb000000200054006f006f006c002000500072006f0070006500720074006900650073003203000002880000011d000002210000017afb000000100044006900730070006c006100790073010000003d0000018b000000c900fffffffb0000002000730065006c0065006300740069006f006e00200062007500660066006500720200000138000000aa0000023a00000294fb00000014005700690064006500530074006500720065006f02000000e6000000d2000003ee0000030bfb0000000c004b0069006e0065006300740200000186000001060000030c00000261fb0000000a0049006d0061006700650000000231000000bc0000002800fffffffb0000000a0049006d0061006700650000000231000000bc0000000000000000fb0000000a0049006d00610067006501000001e20000009f0000000000000000fb0000000a0049006d00610067006501000001ce000000b30000002800ffffff000000010000010f000002b0fc0200000003fb0000001e0054006f006f006c002000500072006f00700065007200740069006500730100000041000000780000000000000000fb0000000a00560069006500770073000000003d000002b0000000a400fffffffb0000001200530065006c0065006300740069006f006e010000025a000000b200000000000000000000000200000490000000a9fc0100000001fb0000000a00560069006500770073030000004e00000080000002e10000019700000003000003120000003efc0100000002fb0000000800540069006d0065010000000000000312000002fb00fffffffb0000000800540069006d00650100000000000004500000000000000000000001b60000024400000004000000040000000800000008fc0000000100000002000000010000000a0054006f006f006c00730100000000ffffffff0000000000000000
+  QMainWindow State: 000000ff00000000fd0000000400000000000001560000025afc020000000cfb0000001200530065006c0065006300740069006f006e00000001e10000009b0000005c00fffffffb0000001e0054006f006f006c002000500072006f007000650072007400690065007302000001ed000001df00000185000000a3fb000000120056006900650077007300200054006f006f02000001df000002110000018500000122fb000000200054006f006f006c002000500072006f0070006500720074006900650073003203000002880000011d000002210000017afb000000100044006900730070006c006100790073010000003d00000181000000c900fffffffb0000002000730065006c0065006300740069006f006e00200062007500660066006500720200000138000000aa0000023a00000294fb00000014005700690064006500530074006500720065006f02000000e6000000d2000003ee0000030bfb0000000c004b0069006e0065006300740200000186000001060000030c00000261fb0000000a0049006d00610067006501000001c4000000d30000002800fffffffb0000000a0049006d00610067006503000000d100000097000001a80000011bfb0000000a0049006d00610067006503000000cd000001b1000001ad00000107fb0000000c00430061006d00650072006100000001e3000000b40000000000000000000000010000010f0000025afc0200000006fb0000001e0054006f006f006c002000500072006f00700065007200740069006500730100000041000000780000000000000000fb0000000a00560069006500770073000000003d00000103000000a400fffffffb0000000a0049006d006100670065010000003d000000b10000000000000000fb0000000a0049006d00610067006501000000f4000000b60000000000000000fb0000000a0049006d00610067006501000001b0000000e70000000000000000fb0000001200530065006c0065006300740069006f006e010000025a000000b200000000000000000000000200000490000000a9fc0100000001fb0000000a00560069006500770073030000004e00000080000002e10000019700000003000004190000003efc0100000002fb0000000800540069006d0065010000000000000419000002fb00fffffffb0000000800540069006d00650100000000000004500000000000000000000002bd0000025a00000004000000040000000800000008fc0000000100000002000000010000000a0054006f006f006c00730100000000ffffffff0000000000000000
   Selection:
     collapsed: false
   Time:
@@ -345,7 +369,7 @@ Window Geometry:
   Tool Properties:
     collapsed: false
   Views:
-    collapsed: true
-  Width: 786
-  X: 946
-  Y: 34
+    collapsed: false
+  Width: 1049
+  X: 603
+  Y: 56

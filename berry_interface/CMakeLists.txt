@@ -20,6 +20,7 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "action/DetectStrawberry.action"
   "action/GripperControl.action"
   "action/VisualServoDetect.action"
+  "action/VisualServoing.action"
   "msg/DetectionBBox.msg"
   DEPENDENCIES std_msgs geometry_msgs          # 사용하는 메시지들
 )

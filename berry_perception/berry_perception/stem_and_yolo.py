@@ -9,7 +9,7 @@ from dataclasses import dataclass
 # YAML 없이 여기서 직접 값을 바꿔서 사용하세요.
 #  - 폴리곤은 꼭짓점 4개(x,y) → 총 8개 숫자
 #  - 흰색: HSV = (0, 0, 255) / 회색: (0, 0, 200) 등
-BOTTOM_MASK_ENABLE: bool = True
+BOTTOM_MASK_ENABLE: bool = False
 BOTTOM_MASK_POLY1: List[int] = [47,0, 126,251, 185,251, 187,209, 221,220, 204,103, 153,0]  # 예) [120,110,  180,90,  210,230,  140,260]
 BOTTOM_MASK_POLY2: List[int] = [526,0, 433,254, 380,255, 364,222, 360,112, 409,0]  # 예) [420,105,  480,130,  450,270,  390,240]
 BOTTOM_MASK_HSV: Tuple[int,int,int] = (66, 21, 204)

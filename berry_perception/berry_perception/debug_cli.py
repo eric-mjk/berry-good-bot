@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 import rclpy, argparse, time
 from rclpy.action import ActionClient
-from berry_interface.action import DetectStrawberry, GripperControl, VisualServoDetect
+from berry_interface.action import DetectStrawberry, GripperControl, VisualServoDetect, VisualServoing
 
 def main():
     rclpy.init()
@@ -18,6 +18,12 @@ def main():
 
     p_grip = sub.add_parser("grip", help="그리퍼 열기/닫기")
     p_grip.add_argument("mode", choices=["open", "close"])
+
+    # IBVS Visual Servoing (Action)
+    p_ibvs = sub.add_parser("ibvs", help="IBVS visual servoing 시작/감시 (VisualServoing.action)")
+    p_ibvs.add_argument("--timeout", type=float, default=15.0,
+                        help="서보 최대 시간(초). 초과 시 서버가 실패 처리 (기본 15)")
+    p_ibvs.add_argument("--duration", type=float, default=0.0, help="N초 후 자동 취소(0이면 Ctrl+C로 취소)")
 
     # Visual Servoing detector (streaming until cancel)
     p_vs = sub.add_parser("vs", help="실시간 YOLO 스트리밍 시작/취소 테스트 (visual_servo_detect)")
@@ -100,7 +106,53 @@ def main():
                 msg = "(no message)"
             node.get_logger().info(f"[CLI] visual_servo_detect 종료: {msg}")
  
+    elif args.cmd == "ibvs":
+        # VisualServoing 액션 호출
+        ac = ActionClient(node, VisualServoing, "visual_servoing")
+        node.get_logger().info("[CLI] waiting for visual_servoing …")
+        ac.wait_for_server()
 
+        goal = VisualServoing.Goal(timeout_sec=float(args.timeout))
+
+        def fb_cb(fb):
+            try:
+                f = fb.feedback
+                node.get_logger().info(f"[IBVS fb] t={f.time_elapsed:.2f}s  state={f.state}")
+            except Exception:
+                pass
+
+        send_future = ac.send_goal_async(goal, feedback_callback=fb_cb)
+        rclpy.spin_until_future_complete(node, send_future)
+        gh = send_future.result()
+        if not gh.accepted:
+            node.get_logger().error("[CLI] visual_servoing goal REJECTED")
+            rclpy.shutdown()
+            return
+
+        node.get_logger().info(f"[CLI] ▶ IBVS 시작 (timeout={args.timeout:.2f}s). 종료하려면 Ctrl+C 또는 --duration 사용.")
+        res_future = gh.get_result_async()
+        try:
+            if args.duration > 0.0:
+                t0 = time.time()
+                while rclpy.ok() and (time.time() - t0) < args.duration:
+                    rclpy.spin_once(node, timeout_sec=0.2)
+                node.get_logger().info("[CLI] duration 만료 → CANCEL 전송")
+                cancel_future = gh.cancel_goal_async()
+                rclpy.spin_until_future_complete(node, cancel_future)
+            else:
+                # 결과가 올 때까지 대기 (Ctrl+C로 취소 가능)
+                while rclpy.ok() and not res_future.done():
+                    rclpy.spin_once(node, timeout_sec=0.5)
+        except KeyboardInterrupt:
+            node.get_logger().info("[CLI] Ctrl+C 감지 → CANCEL 전송")
+            cancel_future = gh.cancel_goal_async()
+            rclpy.spin_until_future_complete(node, cancel_future)
+
+        # 최종 결과 수신/로그
+        rclpy.spin_until_future_complete(node, res_future)
+        result = res_future.result().result
+        node.get_logger().info(f"[CLI] visual_servoing 종료: success={result.success}  message='{result.message}'")
+ 
     rclpy.shutdown()
 if __name__ == "__main__":
     main()
@@ -126,3 +178,17 @@ if __name__ == "__main__":
 # (실시간 결과 토픽)
 #   /visual_servo/rgbd/detection, /visual_servo/rgb/detection
 #   /visual_servo/rgbd/debug_image, /visual_servo/rgb/debug_image
+
+
+# --- IBVS Visual Servoing 테스트 ---
+# 1) 15초 타임아웃으로 실행
+# ros2 run berry_perception debug_cli ibvs --timeout 15
+#
+# 2) 8초 후 자동 취소
+# ros2 run berry_perception debug_cli ibvs --timeout 30 --duration 8
+#
+# 3) 수동 취소(Ctrl+C)
+# ros2 run berry_perception debug_cli ibvs --timeout 30
+# (서버 피드백은 t, state로 출력됨. 정상 종료/타임아웃/취소 모두 최종 메세지 로깅)
+
+ 
