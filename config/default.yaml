@@ -1,8 +1,8 @@
 defaults:
   - _self_          # <= 반드시 첫 항목(또는 마지막)에 추가
-  - bt: rough_approach_test2   # 
+  - bt: pick_with_loops   # 
   # harvest or rough_approach_test or berry_named_pose_test1
-  # rough_approach_test1 or 
+  # rough_approach_test1 or roughApproach_with_ibvs or pick_with_loops
   - robot: fake
   - env: sim
 

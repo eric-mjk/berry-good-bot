@@ -178,7 +178,7 @@ class PerceptionNode(Node):
             rclpy.spin_once(self, timeout_sec=0.1)
 
         cv_img = self.bridge.imgmsg_to_cv2(self.rgb_img, 'bgr8')
-        results = self.model.predict(source=cv_img, conf=0.4, save=False, verbose=False)
+        results = self.model.predict(source=cv_img, conf=0.2, save=False, verbose=False)
         if not results or not results[0].boxes:
             self.get_logger().warn('No strawberry detected')
             goal_handle.abort()
@@ -539,7 +539,7 @@ class PerceptionNode(Node):
         if not ret or frame is None:
             self.get_logger().warn_throttle(5000, "[vs/rgb] failed to read frame")
             return
-        results = self.model.predict(source=frame, conf=0.4, save=False, verbose=False)
+        results = self.model.predict(source=frame, conf=0.2, save=False, verbose=False)
         # bbox, conf, idx = self._best_box(results)
         # 다중 박스 중 이전 프레임과 일관성 유지하도록 선택
         xyxy_list, conf_list = self._get_all_boxes(results)
@@ -593,7 +593,7 @@ class PerceptionNode(Node):
             self.get_logger().debug("[vs/rgbd] waiting for rgb/depth/camera_info")
             return
         cv_img = self.bridge.imgmsg_to_cv2(self.rgb_img, 'bgr8')
-        results = self.model.predict(source=cv_img, conf=0.4, save=False, verbose=False)
+        results = self.model.predict(source=cv_img, conf=0.2, save=False, verbose=False)
         # bbox, conf, idx = self._best_box(results)
         # kpx, kpy, kpc = self._extract_kpts(results, idx) if idx is not None else ([], [], [])
         # bbox, conf = self._best_box(results)

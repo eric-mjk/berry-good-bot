@@ -21,8 +21,8 @@ const float MAX_ACCEL_STEP_PER_S2 = 80000.0;  // ★조정: 최대 가속(스텝
 volatile uint8_t maxStepsPerLoop = 4;   // ★조정: updateStepper() 1회 호출 시 최대 스텝 펄스 수
 
 /* ────── 서보 파라미터 ────── */
-const int  ANGLE_GRIPPER_OPEN   = 150;
-const int  ANGLE_GRIPPER_CLOSED = 75;
+const int  ANGLE_GRIPPER_OPEN   = 170;
+const int  ANGLE_GRIPPER_CLOSED = 65;
 const float MAX_SERVO_DEG_PER_SEC = 180.0;  // ★조정: 서보 속도 한계
 
 /* ────── 런타임 상태 ────── */

@@ -111,21 +111,40 @@ public:
       return BT::NodeStatus::FAILURE;
     }
     auto wrapped = res_fut.get();
+    // const auto& ps = wrapped.result->approach_pose_base;
+
+    // 1) 액션 결과 코드 확인 (SUCCEEDED 외에는 실패 취급)
+    if (wrapped.code != rclcpp_action::ResultCode::SUCCEEDED) {
+      std::cerr << "[DetectApproachPose] action finished with code="
+                << static_cast<int>(wrapped.code)
+                << " (expect SUCCEEDED). Failing BT node.\n";
+      return BT::NodeStatus::FAILURE;
+    }
+
     const auto& ps = wrapped.result->approach_pose_base;
 
+    // 2) 결과 포즈 유효성 검사 (NaN/inf 및 원점(0,0,0) 보호)
+    const double ax = ps.pose.position.x;
+    const double ay = ps.pose.position.y;
+    const double az = ps.pose.position.z;
+    const bool finite_pos = std::isfinite(ax) && std::isfinite(ay) && std::isfinite(az);
+    const double norm = std::sqrt(ax*ax + ay*ay + az*az);
+    if (!finite_pos || norm < 1e-6) {
+      std::cerr << "[DetectApproachPose] invalid approach pose from action "
+                << "(pos=" << ax << "," << ay << "," << az << "). Failing.\n";
+      return BT::NodeStatus::FAILURE;
+    }
     // 블랙보드로 출력
-    setOutput("ax", ps.pose.position.x);
-    setOutput("ay", ps.pose.position.y);
-    setOutput("az", ps.pose.position.z);
+    setOutput("ax", ax);
+    setOutput("ay", ay);
+    setOutput("az", az);
     setOutput("qx", ps.pose.orientation.x);
     setOutput("qy", ps.pose.orientation.y);
     setOutput("qz", ps.pose.orientation.z);
     setOutput("qw", ps.pose.orientation.w);
 
     std::cout << "[DetectApproachPose] approach(base_link): "
-              << ps.pose.position.x << ", "
-              << ps.pose.position.y << ", "
-              << ps.pose.position.z << "\n";
+              << ax << ", " << ay << ", " << az << "\n";
     return BT::NodeStatus::SUCCESS;
   }
 

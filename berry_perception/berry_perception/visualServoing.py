@@ -108,8 +108,8 @@ class IBVSBottomServo(Node):
         self.declare_parameter("K_vz", 1.5)
         self.declare_parameter("v_limit", 0.2)        # [m/s]
         self.declare_parameter("tip_offset_z", 0.12)   # link5 z축 +0.13m
-        self.declare_parameter("tol_z", 0.01)          # [m]  z 게이트 임계
-        self.declare_parameter("tol_xy", 0.01)         # [m]  xy 종료 임계
+        self.declare_parameter("tol_z", 0.02)          # [m]  z 게이트 임계
+        self.declare_parameter("tol_xy", 0.02)         # [m]  xy 종료 임계
  
 
 
@@ -193,6 +193,9 @@ class IBVSBottomServo(Node):
         # 종료 판단 변수
         self._steady_ok = 0
         self._reached_flag = False   # 액션 스레드와 공유
+
+        # 지난 프레임에서 성공적으로 계산된 타깃 3D 포인트(베이스 좌표계)
+        self._last_target_base = None
 
         # 디버그 주기 제한용 타임스탬프
         self._last_tri_dump_s   = 0.0
@@ -338,6 +341,7 @@ class IBVSBottomServo(Node):
         self._vs_deadline = -1.0
         self._reached_flag = False
         self._steady_ok = 0
+        self._last_target_base = None
         # ServoTwist 관련
         self._requested_stop = False
         self._servo_pending = False
@@ -464,6 +468,7 @@ class IBVSBottomServo(Node):
         ux_err  = None
         tri_ok = False
         target_base = None
+        using_prev = False
 
         # ROI 중심 x
         cx_roi = gx + 0.5 * gw
@@ -669,6 +674,11 @@ class IBVSBottomServo(Node):
                         P_top = P_top_raw
                     target_base = P_top
 
+                    # 최신 성공 타깃으로 저장 (다음 프레임 실패 시 사용)
+                    try: self._last_target_base = target_base.copy()
+                    except Exception: self._last_target_base = target_base
+ 
+
                     # ---- 목표점 오프셋 적용 (base +Z) ----
                     target_offset = float(self.get_parameter("target_offset_z_base").value)
                     target_goal = target_base + np.array([0.0, 0.0, target_offset], dtype=np.float64)
@@ -716,6 +726,25 @@ class IBVSBottomServo(Node):
                                   f"by1={'ok' if by1 is not None else 'None'}, ty2={'ok' if ty2 is not None else 'None'}, "
                                   f"top_info={'ok' if self.top_info is not None else 'None'}")
 
+        # ── 삼각측량 실패 시: 이전에 성공했던 타깃을 그대로 사용(업데이트 없음) ──
+        if (not tri_ok) and (self._last_target_base is not None):
+            target_base = self._last_target_base
+            tri_ok = True
+            using_prev = True
+            # 디버그 로깅 및 마커(회색)로 이전 타깃 재사용을 표시
+            self._dinfo("[tri] current frame failed → use previous target (no update)")
+            try:
+                # 원래 타깃(회색)
+                publish_marker(self.marker_pub, self.base_frame, self.get_clock().now().to_msg(),
+                               target_base, color=(0.6,0.6,0.6), ns="ibvs_prev", mid=15)
+                # 오프셋 적용 목표점(연회색)
+                target_offset = float(self.get_parameter("target_offset_z_base").value)
+                target_goal_prev = target_base + np.array([0.0, 0.0, target_offset], dtype=np.float64)
+                publish_marker(self.marker_pub, self.base_frame, self.get_clock().now().to_msg(),
+                               target_goal_prev, color=(0.8,0.8,0.8), ns="ibvs_prev_goal", mid=16)
+            except Exception:
+                pass
+
         # 7) Gripper tip(기준점) & 선속도 계산
         vx = vy = vz = 0.0
         reached_lin = False
@@ -729,6 +758,11 @@ class IBVSBottomServo(Node):
                 # 오프셋 적용된 목표점 사용
                 target_offset = float(self.get_parameter("target_offset_z_base").value)
                 target_goal = target_base + np.array([0.0, 0.0, target_offset], dtype=np.float64)
+                # 이전 타깃 사용 중임을 마커 색으로도 한 번 더 표기(선택)
+                if using_prev:
+                    publish_marker(self.marker_pub, self.base_frame, self.get_clock().now().to_msg(),
+                                   target_goal, color=(0.8,0.8,0.8), ns="ibvs_prev_goal", mid=16)
+
                 err = target_goal - tip
 
                 ez = float(err[2]); ex = float(err[0]); ey = float(err[1])

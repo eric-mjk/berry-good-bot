@@ -1,0 +1,124 @@
+<!-- /behavior_trees/pick_with_loops.xml -->
+<root main_tree_to_execute="PickLoop">
+  <!-- 반복 가능한 딸기 수확 루프 -->
+  <BehaviorTree ID="PickLoop">
+    <Sequence name="RootSeq">
+      <!-- 준비: ready pose 리스트 초기화 -->
+      <!-- pose_list 는 launch 파라미터로 바꿔도 됨 -->
+      <PoseListInit pose_list="ready,ready1,ready2,ready3"
+                    current="{ready_pose}"
+                    first="{first_ready}"/>
+
+      <!-- 루프: 자식이 SUCCESS 또는 RUNNING인 동안 계속 틱, 자식이 FAILURE면 종료 -->
+      <KeepRunningUntilFailure>
+        <Fallback name="TryPickOrAdvance">
+
+          <!-- ========== 현재 ready_pose 에서 하나 따기 시도 ========== -->
+          <Sequence name="PickOneAtCurrentReady">
+            <!-- 0) 현재 ready 로 이동 & 동기화 & 그리퍼 오픈 -->
+            <MoveToNamedPose pose="{ready_pose}"/>
+            <WaitRealRobotSync tolerance="0.01" stable_time="0.7" timeout="30.0"/>
+            <GripperAction mode="open" timeout="8.0"/>
+
+            <!-- 1) 1차 탐지 (offset 0.05) : 같은 ready에서 최대 3회 재시도 -->
+            <RetryUntilSuccessful num_attempts="2">
+              <DetectApproachPose offset_z="0.05"
+                                  ax="{appr_x}" ay="{appr_y}" az="{appr_z}"
+                                  qx="{appr_qx}" qy="{appr_qy}" qz="{appr_qz}" qw="{appr_qw}"/>           
+            </RetryUntilSuccessful>
+
+            <!-- 2) 접근 서보 -->
+            <ServoToTargetPose ax="{appr_x}" ay="{appr_y}" az="{appr_z}"
+                               qx="{appr_qx}" qy="{appr_qy}" qz="{appr_qz}" qw="{appr_qw}"
+                               base_frame="base_link" tip_frame="link5"
+                               kp_pos="0.8" kp_ori="1.2"
+                               vmax_lin="0.2" vmin_lin="0.1"
+                               vmax_ang="1.0"  vmin_ang="0.5"
+                               pos_tol="0.01"  ori_tol="0.05"
+                               stable_time="0.5" timeout="40.0"/>
+            <WaitRealRobotSync tolerance="0.01" stable_time="0.3" timeout="15.0"/>
+
+            <!-- 3) 2차 정밀 탐지 + 접근 + IBVS
+                 - 5회까지 허용
+                 - 각 시도는 (현 위치에서 Detect(0.01) → ServoToTargetPose → IBVS)
+                 - Detect가 실패하면 그때만 ready로 복귀하고 실패를 강제해 Retry 유도
+                 - IBVS 블록은 내부적으로 3회까지 재시도
+                   (실패 시 이전 접근 포즈로 되돌아간 후 강제 실패하여 Retry 유도)
+            -->
+            <RetryUntilSuccessful num_attempts="2">
+              <Sequence name="RefineAndIBVS_Attempt">
+                <!-- (a) 2차 Detect: 현 위치에서 먼저 시도. 실패 시에만 ready 복귀 후 실패 강제 -->
+                <Fallback name="DetectInPlace_or_ReturnAndRetry">
+                  <!-- 성공 경로: Detect 성공 시 Fallback=SUCCESS -->
+                  <DetectApproachPose offset_z="0.01"
+                                      ax="{appr_x}" ay="{appr_y}" az="{appr_z}"
+                                      qx="{appr_qx}" qy="{appr_qy}" qz="{appr_qz}" qw="{appr_qw}"/>
+                  <!-- 실패 경로: ready로 돌아가고 강제 실패하여 Retry 유도 -->
+                  <Sequence>
+                    <MoveToNamedPose pose="{ready_pose}"/>
+                    <WaitRealRobotSync tolerance="0.01" stable_time="0.5" timeout="30.0"/>
+                    <AlwaysFailure/>
+                  </Sequence>
+                </Fallback>
+
+                <!-- (b) 접근 -->
+                <ServoToTargetPose ax="{appr_x}" ay="{appr_y}" az="{appr_z}"
+                                   qx="{appr_qx}" qy="{appr_qy}" qz="{appr_qz}" qw="{appr_qw}"
+                                   base_frame="base_link" tip_frame="link5"
+                                   kp_pos="0.8" kp_ori="1.2"
+                                   vmax_lin="0.2" vmin_lin="0.1"
+                                   vmax_ang="1.0"  vmin_ang="0.5"
+                                   pos_tol="0.01"  ori_tol="0.05"
+                                   stable_time="0.5" timeout="40.0"/>
+                <WaitRealRobotSync tolerance="0.01" stable_time="0.3" timeout="15.0"/>
+
+                <!-- (c) IBVS: 실패 시 이전 접근 포즈로 복귀 후 재시도(최대 3회) -->
+                <RetryUntilSuccessful num_attempts="1">
+                  <Fallback name="IBVS_or_ReturnThenFail">
+                    <!-- IBVS 성공하면 그대로 SUCCESS -->
+                    <VisualServoing timeout="40.0"/>
+                   <!-- 실패 시: 이전 접근 포즈로 복귀하고 강제 실패해서 Retry 유도 -->
+                    <Sequence>
+                      <ServoToTargetPose ax="{appr_x}" ay="{appr_y}" az="{appr_z}"
+                                         qx="{appr_qx}" qy="{appr_qy}" qz="{appr_qz}" qw="{appr_qw}"
+                                         base_frame="base_link" tip_frame="link5"
+                                         kp_pos="0.8" kp_ori="1.2"
+                                         vmax_lin="0.2" vmin_lin="0.1"
+                                         vmax_ang="1.0"  vmin_ang="0.5"
+                                         pos_tol="0.01"  ori_tol="0.05"
+                                         stable_time="0.3" timeout="20.0"/>
+                      <WaitRealRobotSync tolerance="0.01" stable_time="0.2" timeout="10.0"/>
+                      <AlwaysFailure/>
+                    </Sequence>
+                  </Fallback>
+                </RetryUntilSuccessful>
+              </Sequence>
+            </RetryUntilSuccessful>
+
+            <!-- 4) 집게 닫고 바스켓 투입 → 원래 첫 ready로 복귀 -->
+            <GripperAction mode="close" timeout="8.0"/>
+
+            <MoveToNamedPose pose="{ready_pose}"/>
+            <WaitRealRobotSync tolerance="0.01" stable_time="0.7" timeout="30.0"/>
+            <MoveToNamedPose pose="basket"/>
+            <WaitRealRobotSync tolerance="0.01" stable_time="0.5" timeout="30.0"/>
+            <GripperAction mode="open" timeout="8.0"/>
+            <!-- 한 개 완료 후에도 루프 계속 돌기 위해 성공을 고정 -->
+            <AlwaysSuccess/>
+          </Sequence>
+
+          <!-- ========== 첫 탐지(3회)마저 실패했을 때: 다음 ready로 넘어가기 ========== -->
+          <Sequence name="AdvanceReadyPose">
+            <PoseListNext pose_list="ready,ready1,ready2,ready3"
+                          current="{ready_pose}"/>
+            <MoveToNamedPose pose="{ready_pose}"/>
+            <WaitRealRobotSync tolerance="0.01" stable_time="0.7" timeout="30.0"/>
+            <!-- 다음 ready에서 다시 루프 진행하도록 성공 고정 -->
+            <AlwaysSuccess/>
+          </Sequence>
+
+        </Fallback>
+      </KeepRunningUntilFailure>
+    </Sequence>
+  </BehaviorTree>
+</root>

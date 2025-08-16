@@ -34,6 +34,6 @@ def generate_launch_description():
         package='berry_perception', executable='visualServoing',
         output='screen')
 
-    # return LaunchDescription([realsense_launch, perception, visualServoing])
-    return LaunchDescription([realsense_launch, perception])
+    return LaunchDescription([realsense_launch, perception, visualServoing])
+    # return LaunchDescription([realsense_launch, perception])
 

@@ -11,6 +11,8 @@
 #include "strawberry_task_planner/rough_approach_nodes.hpp" // 새로 추가할 노드
 #include "strawberry_task_planner/named_pose_nodes.hpp"
 #include "strawberry_task_planner/rough_approach_bt_nodes.hpp"
+#include "strawberry_task_planner/ibvs_bt_nodes.hpp"
+#include "strawberry_task_planner/utility_nodes.hpp"
 
 
 namespace strawberry_bt_nodes {
@@ -84,6 +86,15 @@ int main(int argc, char **argv)
                 factory.registerNodeType<strawberry_bt_nodes::DetectApproachPoseBT>("DetectApproachPose");
                 factory.registerNodeType<strawberry_bt_nodes::ServoToTargetPoseBT>("ServoToTargetPose");
      
+            } else if (type_name == "ibvs_bt_nodes") {
+                RCLCPP_INFO(node->get_logger(), "Registering IBVS/Gripper BT Nodes (GripperAction, VisualServoing)");
+                factory.registerNodeType<strawberry_bt_nodes::GripperControlBT>("GripperAction");
+                factory.registerNodeType<strawberry_bt_nodes::VisualServoingBT>("VisualServoing");
+            } else if (type_name == "utility_nodes") {
+                RCLCPP_INFO(node->get_logger(), "Registering Utility Nodes (PoseListInit, PoseListNext)");
+                factory.registerNodeType<strawberry_bt_nodes::PoseListInit>("PoseListInit");
+                factory.registerNodeType<strawberry_bt_nodes::PoseListNext>("PoseListNext");
+ 
             } else {
                     RCLCPP_WARN(node->get_logger(), "Unknown node type group '%s' in 'register_node_types' parameter. Skipping.", type_name.c_str());
                 }

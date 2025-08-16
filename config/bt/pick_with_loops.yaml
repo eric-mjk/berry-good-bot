@@ -1,0 +1,4 @@
+# config/bt/roughApproach_with_ibvs.yaml
+
+tree_file_path: "/home/wossas/Desktop/strawberry_robotArm/strawberry_ws/src/berry-good-bot/behavior_trees/pick_with_loops.xml"
+register_node_types: ["utility_nodes","ibvs_bt_nodes", "named_pose_nodes", "rough_approach_nodes"]

@@ -189,6 +189,6 @@ if __name__ == "__main__":
 #
 # 3) 수동 취소(Ctrl+C)
 # ros2 run berry_perception debug_cli ibvs --timeout 30
-# (서버 피드백은 t, state로 출력됨. 정상 종료/타임아웃/취소 모두 최종 메세지 로깅)
+# (서버 피드백은 t, state로 출력됨. 정상 종료/타임아웃/취소 모두 최종 메세지 로깅)d
 
  
