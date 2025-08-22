@@ -29,6 +29,7 @@ setup(
             'debug_cli            = berry_perception.debug_cli:main',
             'bottom_cam_param_test= berry_perception.bottom_cam_param_test:main',
             'visualServoing       = berry_perception.visualServoing:main',
+            'dataSetCapture       = berry_perception.dataSetCapture:main',
             'microsServoingPerceptionTest= berry_perception.microsServoingPerceptionTest:main',
         ],
     },

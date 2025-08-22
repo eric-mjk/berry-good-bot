@@ -1,7 +1,7 @@
 /* ───────────────────── 핀 매핑 ───────────────────── */
 const int StepPin[3]  = {2, 3, 4};
 const int DirPin[3]   = {5, 6, 7};
-const int LimitPin[3] = {9,10,11};      // LOW = 스위치 ON
+const int LimitPin[3] = {9,45,11};      // LOW = 스위치 ON
 
 /* ───────────────── 스텝/기어 파라미터 ─────────────── */
 const int   STEPS_PER_REV = 200;         // 모터 1회전 스텝
