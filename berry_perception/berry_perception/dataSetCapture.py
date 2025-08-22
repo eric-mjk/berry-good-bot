@@ -156,17 +156,21 @@ class DatasetCapture2Hz(Node):
     # ──────────────────────────
     def _cb_bottom_rgb(self, msg: Image):
         try:
-            bgr = self.bridge.imgmsg_to_cv2(msg, 'bgr8')
+            # bgr = self.bridge.imgmsg_to_cv2(msg, 'bgr8')
+            bgr = self.bridge.imgmsg_to_cv2(msg, desired_encoding='passthrough')
         except Exception:
-            bgr = self.bridge.imgmsg_to_cv2(msg, desired_encoding='bgr8')
+            # bgr = self.bridge.imgmsg_to_cv2(msg, desired_encoding='bgr8')
+            bgr = self.bridge.imgmsg_to_cv2(msg, desired_encoding='passthrough')
         with self._lock:
             self._bot_bgr = bgr
 
     def _cb_top_rgb(self, msg: Image):
         try:
-            bgr = self.bridge.imgmsg_to_cv2(msg, 'bgr8')
+            # bgr = self.bridge.imgmsg_to_cv2(msg, 'bgr8')
+            bgr = self.bridge.imgmsg_to_cv2(msg, desired_encoding='passthrough')
         except Exception:
-            bgr = self.bridge.imgmsg_to_cv2(msg, desired_encoding='bgr8')
+            # bgr = self.bridge.imgmsg_to_cv2(msg, desired_encoding='bgr8')
+            bgr = self.bridge.imgmsg_to_cv2(msg, desired_encoding='passthrough')
         with self._lock:
             self._top_bgr = bgr
             if self._stamp_from_top_hdr:
