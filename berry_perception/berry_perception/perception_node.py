@@ -44,6 +44,8 @@ class PerceptionNode(Node):
         # 기본값은 예시이며 실제 로봇에 맞게 launch/YAML로 오버라이드하세요.
         self.declare_parameter('bottom_camera_to_eef', [0.0, -0.09, 0.0365, 0.0, -math.pi/2, -math.pi/2]) # xyz + rpy
         self.declare_parameter('bottom_camera_tilt_deg', -35.0)  # 필요 시 틸트 보정
+        # 1단계 선택 시 conf 임계값(이상) 중 EEF와 최근접 후보 선택
+        self.declare_parameter('stage1_min_conf', 0.4)
 
         cam2eef = self.get_parameter('camera_to_eef').value
         self.logger.debug(f"[PARAM] camera_to_eef = {cam2eef}")
@@ -82,7 +84,7 @@ class PerceptionNode(Node):
 
         # ────── YOLOv8 초기화 ───────────────────────────────────────
         pkg_share  = get_package_share_directory('berry_perception')
-        model_path = os.path.join(pkg_share, 'model', 'model1.pt')
+        model_path = os.path.join(pkg_share, 'model', 'model3.pt')
         self.logger.info(f"[YOLO] loading weights: {model_path}")
         self.model = YOLO(model_path)
         self.model.model.to('cuda:0' if torch.cuda.is_available() else 'cpu')
@@ -169,8 +171,13 @@ class PerceptionNode(Node):
 
     # ----------------- Main Action --------------------------------
     async def execute_cb(self, goal_handle):
+        # offset_z = goal_handle.request.offset_z
+        # self.logger.info(f"[ACTION] new goal: offset_z={offset_z:.3f}")
         offset_z = goal_handle.request.offset_z
-        self.logger.info(f"[ACTION] new goal: offset_z={offset_z:.3f}")
+        stage    = getattr(goal_handle.request, "approach_stage", 1)
+        prev_pt  = getattr(goal_handle.request, "prev_target_base", Point())
+        prev_gate = getattr(goal_handle.request, "prev_gate_m", 0.0)
+        self.logger.info(f"[ACTION] new goal: offset_z={offset_z:.3f}, stage={int(stage)}, gate={prev_gate:.3f}")
 
         # 최신 frame 올 때까지 대기
         while self.rgb_img is None or self.depth_img is None or self.cam_info is None:
@@ -178,56 +185,167 @@ class PerceptionNode(Node):
             rclpy.spin_once(self, timeout_sec=0.1)
 
         cv_img = self.bridge.imgmsg_to_cv2(self.rgb_img, 'bgr8')
-        results = self.model.predict(source=cv_img, conf=0.2, save=False, verbose=False)
+        results = self.model.predict(source=cv_img, conf=0.3, save=False, verbose=False)
         if not results or not results[0].boxes:
             self.get_logger().warn('No strawberry detected')
             goal_handle.abort()
             return DetectStrawberry.Result()
 
-        # 가장 높은 confidence 선택
-        boxes = results[0].boxes
-        best  = boxes[boxes.conf.argmax()]
-        self.logger.info(f"[YOLO] {len(boxes)} boxes, best conf={float(best.conf):.3f}")
+        # # 가장 높은 confidence 선택
+        # boxes = results[0].boxes
+        # best  = boxes[boxes.conf.argmax()]
+        # self.logger.info(f"[YOLO] {len(boxes)} boxes, best conf={float(best.conf):.3f}")
 
-        x1, y1, x2, y2 = map(int, best.xyxy[0])
-        cx, cy = int((x1+x2)/2), int((y1+y2)/2)
+        # x1, y1, x2, y2 = map(int, best.xyxy[0])
+        # cx, cy = int((x1+x2)/2), int((y1+y2)/2)
 
-        # z값(dept) 확보
-        # depth = self.bridge.imgmsg_to_cv2(self.depth_img, 'passthrough')[cy, cx] / 1000.0  # mm→m
-        # if depth == 0.0:
-        #     goal_handle.abort()
-        #     return DetectStrawberry.Result()
+        # # z값(dept) 확보
+        # # depth = self.bridge.imgmsg_to_cv2(self.depth_img, 'passthrough')[cy, cx] / 1000.0  # mm→m
+        # # if depth == 0.0:
+        # #     goal_handle.abort()
+        # #     return DetectStrawberry.Result()
 
-        # ─── 깊이 추정 (박스 전체 → 이상치 제거 후 robust median) ────
-        depth_np = self.bridge.imgmsg_to_cv2(
-            self.depth_img, 'passthrough').astype(np.float32) / 1000.0
-        win = depth_np[y1:y2, x1:x2].reshape(-1)
-        vals = win[(win > 0) & np.isfinite(win)]
-        if vals.size == 0:
-            self.logger.warn("No valid depth → abort")
+        # 공통 준비물: depth / 카메라내부 / TF(cam->base)
+        depth_np = self.bridge.imgmsg_to_cv2(self.depth_img, 'passthrough').astype(np.float32) / 1000.0
+        fx = self.cam_info.k[0];  fy = self.cam_info.k[4]
+        cx0 = self.cam_info.k[2]; cy0 = self.cam_info.k[5]
+        try:
+            tf_cam2base = self.tfb.lookup_transform('base_link', self.get_parameter('camera_frame').value, rclpy.time.Time())
+            mat_cam2base = tft.concatenate_matrices(
+                tft.translation_matrix((tf_cam2base.transform.translation.x,
+                                        tf_cam2base.transform.translation.y,
+                                        tf_cam2base.transform.translation.z)),
+                tft.quaternion_matrix(
+                    (tf_cam2base.transform.rotation.x,
+                     tf_cam2base.transform.rotation.y,
+                     tf_cam2base.transform.rotation.z,
+                     tf_cam2base.transform.rotation.w)))
+        except Exception as e:
+            self.get_logger().error(f"TF error: {e}")
             goal_handle.abort()
             return DetectStrawberry.Result()
-        med  = np.median(vals)
-        mad  = np.median(np.abs(vals - med))
-        thresh = 3 * 1.4826 * mad if mad > 0 else np.inf
-        inliers = vals[np.abs(vals - med) < thresh]
-        # depth = float(np.median(inliers))            # robust depth  :contentReference[oaicite:0]{index=0}
-        # ─── 깊이 추정 방식 변경: 하위 25 % 값들의 평균 ───
-        sorted_vals = np.sort(inliers)
-        q25_len = max(1, int(len(sorted_vals) * 0.25))
-        depth = float(np.mean(sorted_vals[:q25_len]))
-        self.logger.info(f"[DEPTH] {len(inliers)}/{len(vals)} inliers, depth={depth:.3f} m")
+
+        # 후보 생성 유틸: bbox → (cx,cy,depth)->cam→base
+        def _bbox_center3d_base(x1,y1,x2,y2):
+            # 강건 depth (bbox 하위 25% 평균)
+            win = depth_np[max(0,y1):max(0,y2), max(0,x1):max(0,x2)].reshape(-1)
+            vals = win[(win > 0) & np.isfinite(win)]
+            if vals.size == 0:
+                return None
+            med  = np.median(vals); mad = np.median(np.abs(vals - med))
+            thr  = 3 * 1.4826 * mad if mad > 0 else np.inf
+            inl  = vals[np.abs(vals - med) < thr]
+            srt  = np.sort(inl); qn = max(1, int(len(srt) * 0.25))
+            d    = float(np.mean(srt[:qn]))
+            if not np.isfinite(d) or d <= 0: return None
+            cxp, cyp = int((x1+x2)/2), int((y1+y2)/2)
+            x_opt = (cxp - cx0) * d / fx
+            y_opt = (cyp - cy0) * d / fy
+            z_opt = d
+            X =  z_opt;  Y = -x_opt;  Z = -y_opt
+            p_cam  = np.array([X, Y, Z, 1.0])
+            p_base = (mat_cam2base @ p_cam)[:3]
+            return (cxp, cyp, d, p_base)
+
+        # ── Stage 분기 ──────────────────────────────────────────────
+        boxes = results[0].boxes
+        if int(stage) == 2:
+            # 2단계: BT가 준 prev_target_base에 가장 가까운 후보 선택(게이트 적용 가능)
+            px, py, pz = float(prev_pt.x), float(prev_pt.y), float(prev_pt.z)
+            anchor = np.array([px, py, pz], dtype=float)
+            best = None
+            min_d = float('inf')
+            for i in range(len(boxes)):
+                x1, y1, x2, y2 = map(int, boxes.xyxy[i].tolist())
+                got = _bbox_center3d_base(x1,y1,x2,y2)
+                if got is None: 
+                    continue
+                cx, cy, d, p_base = got
+                dd = float(np.linalg.norm(p_base - anchor))
+                if prev_gate > 0.0 and dd > prev_gate:
+                    continue
+                if dd < min_d:
+                    min_d = dd
+                    best = (x1,y1,x2,y2,cx,cy,d,p_base)
+            if best is None:
+                self.get_logger().warn("Stage2: no candidate within gate or depth invalid")
+                goal_handle.abort()
+                return DetectStrawberry.Result()
+            x1,y1,x2,y2,cx,cy,depth,st_base = best
+            self.logger.info(f"[STAGE2] picked near anchor, dist={min_d:.3f} m")
+        else:
+        #     # 1단계: 기존 로직(최고 conf) 유지
+        #     best_box = boxes[boxes.conf.argmax()]
+        #     self.logger.info(f"[YOLO] {len(boxes)} boxes, best conf={float(best_box.conf):.3f}")
+        #     x1, y1, x2, y2 = map(int, best_box.xyxy[0])
+        #     cx, cy = int((x1+x2)/2), int((y1+y2)/2)
+        #     got = _bbox_center3d_base(x1,y1,x2,y2)
+        #     if got is None:
+        #         self.logger.warn("No valid depth for best box → abort")
+        #         goal_handle.abort()
+        #         return DetectStrawberry.Result()
+        #     cx, cy, depth, st_base = got
+        #     self.logger.info(f"[STAGE1] depth={depth:.3f} m")
+
+        # self.logger.info(f"[DEPTH] depth({cx},{cy}) = {depth:.3f} m")
+
+            # 1단계: conf ≥ threshold 후보들 중 EEF(link5)와 가장 가까운 물체 선택
+            min_conf = float(self.get_parameter('stage1_min_conf').value)
+            try:
+                tf_link5  = self.tfb.lookup_transform('base_link', 'link5', rclpy.time.Time())
+            except Exception as e:
+                self.get_logger().error(f"TF link5 error: {e}")
+                goal_handle.abort()
+                return DetectStrawberry.Result()
+            link5_org = np.array([
+                tf_link5.transform.translation.x,
+                tf_link5.transform.translation.y,
+                tf_link5.transform.translation.z
+            ], dtype=float)
+
+            # 1차 패스: conf ≥ min_conf
+            best = None
+            min_d = float('inf')
+            for i in range(len(boxes)):
+                # confidence check
+                try:
+                    conf_i = float(boxes.conf[i].item())
+                except Exception:
+                    conf_i = float(boxes.conf[i].cpu().numpy())
+                if conf_i < min_conf:
+                    continue
+                x1, y1, x2, y2 = map(int, boxes.xyxy[i].tolist())
+                got = _bbox_center3d_base(x1,y1,x2,y2)
+                if got is None:
+                    continue
+                cx_i, cy_i, d_i, p_base = got
+                dd = float(np.linalg.norm(p_base - link5_org))
+                if dd < min_d:
+                    min_d = dd
+                    best = (x1,y1,x2,y2,cx_i,cy_i,d_i,p_base)
+
+            # 2차 패스: (fallback) threshold 만족 후보가 없으면 모든 후보 중 최근접
+            if best is None:
+                for i in range(len(boxes)):
+                    x1, y1, x2, y2 = map(int, boxes.xyxy[i].tolist())
+                    got = _bbox_center3d_base(x1,y1,x2,y2)
+                    if got is None:
+                        continue
+                    cx_i, cy_i, d_i, p_base = got
+                    dd = float(np.linalg.norm(p_base - link5_org))
+                    if dd < min_d:
+                        min_d = dd
+                        best = (x1,y1,x2,y2,cx_i,cy_i,d_i,p_base)
+
+            if best is None:
+                self.get_logger().warn("Stage1: no candidate with valid depth")
+                goal_handle.abort()
+                return DetectStrawberry.Result()
+
+            x1,y1,x2,y2,cx,cy,depth,st_base = best
+            self.logger.info(f"[STAGE1] picked nearest to EEF, dist={min_d:.3f} m (min_conf={min_conf:.2f})")
 
 
-        self.logger.info(f"[DEPTH] depth({cx},{cy}) = {depth:.3f} m")
-
-        # # 픽셀→3D (pin-hole)
-        # fx = self.cam_info.k[0];  fy = self.cam_info.k[4]
-        # cx0 = self.cam_info.k[2]; cy0 = self.cam_info.k[5]
-        # X = (cx - cx0) * depth / fx
-        # Y = (cy - cy0) * depth / fy
-        # Z = depth
-        # self.logger.info(f"[PINHOLE] cam-coords X={X:.3f}, Y={Y:.3f}, Z={Z:.3f}")
         # ─── ① Optical-Frame 좌표 (REP-103: x→right, y→down, z→forward)
         fx = self.cam_info.k[0];  fy = self.cam_info.k[4]
         cx0 = self.cam_info.k[2]; cy0 = self.cam_info.k[5]
@@ -256,25 +374,8 @@ class PerceptionNode(Node):
             DetectStrawberry.Feedback(strawberry_pose_cam=st_pose_cam))
 
         p_cam  = np.array([X, Y, Z, 1.0])
-        try:
-            tf_cam2base = self.tfb.lookup_transform(
-                'base_link', st_pose_cam.header.frame_id,
-                rclpy.time.Time())                      # 최신 TF
-            mat_cam2base = tft.concatenate_matrices(
-                tft.translation_matrix((tf_cam2base.transform.translation.x,
-                                        tf_cam2base.transform.translation.y,
-                                        tf_cam2base.transform.translation.z)),
-                tft.quaternion_matrix(
-                    (tf_cam2base.transform.rotation.x,
-                     tf_cam2base.transform.rotation.y,
-                     tf_cam2base.transform.rotation.z,
-                     tf_cam2base.transform.rotation.w)))
-        except Exception as e:
-            self.get_logger().error(f"TF error: {e}")
-            goal_handle.abort()
-            return DetectStrawberry.Result()
-
-        st_base = (mat_cam2base @ p_cam)[:3]            # 딸기 위치(base)
+        
+        st_base = (mat_cam2base @ p_cam)[:3] if int(stage)!=2 else st_base  # stage2는 위에서 이미 산출
 
         tf_link4 = self.tfb.lookup_transform('base_link', 'link4', rclpy.time.Time())
         R_link4  = tft.quaternion_matrix((
@@ -386,7 +487,10 @@ class PerceptionNode(Node):
         self.tf_dyn.sendTransform(t)
 
         goal_handle.succeed()
-        return DetectStrawberry.Result(approach_pose_base=appro_pose_base)
+        return DetectStrawberry.Result(
+            approach_pose_base=appro_pose_base,
+            strawberry_center_base=Point(x=float(st_base[0]), y=float(st_base[1]), z=float(st_base[2]))
+        )
 
     # ----------------- RViz marker util ----------------------------
     def publish_marker(self, pose, id, color):
@@ -531,156 +635,6 @@ class PerceptionNode(Node):
         sorted_vals = np.sort(vals)
         q25_len = max(1, int(len(sorted_vals) * 0.25))
         return float(np.mean(sorted_vals[:q25_len]))
-
-    def _process_rgb_frame(self):
-        if self._rgb_cap is None:
-            return
-        ret, frame = self._rgb_cap.read()
-        if not ret or frame is None:
-            self.get_logger().warn_throttle(5000, "[vs/rgb] failed to read frame")
-            return
-        results = self.model.predict(source=frame, conf=0.2, save=False, verbose=False)
-        # bbox, conf, idx = self._best_box(results)
-        # 다중 박스 중 이전 프레임과 일관성 유지하도록 선택
-        xyxy_list, conf_list = self._get_all_boxes(results)
-        idx = self._choose_track(self._prev_bbox_rgb, xyxy_list, conf_list)
-        stamp = self.get_clock().now().to_msg()
-        # kpx, kpy, kpc = self._extract_kpts(results, idx) if idx is not None else ([], [], [])
-        # if bbox is not None:
-        #     x1, y1, x2, y2 = bbox
-        kpx, kpy, kpc = self._extract_kpts(results, idx) if idx is not None else ([], [], [])
-        if idx is not None:
-            x1, y1, x2, y2 = xyxy_list[idx]
-            conf = conf_list[idx]
-            cx, cy = (x1 + x2) * 0.5, (y1 + y2) * 0.5
-            # draw
-            cv2.rectangle(frame, (x1, y1), (x2, y2), (0,255,0), 2)
-            cv2.circle(frame, (int(cx), int(cy)), 3, (0,0,255), -1)
-            cv2.putText(frame, f"{conf:.2f}", (x1, max(0, y1-5)), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255,255,255), 1)
-            # draw keypoints
-            for i in range(len(kpx)):
-                u, v = int(kpx[i]), int(kpy[i])
-                if u > 0 and v > 0:
-                    cv2.circle(frame, (u, v), 3, (0, 0, 255), -1)
-            # publish msg
-            msg = DetectionBBox()
-            msg.header.stamp = stamp
-            msg.header.frame_id = self.get_parameter('rgb_camera_frame').value
-            msg.camera_name = "rgb"
-            msg.conf = float(conf)
-            # msg.x1, msg.y1, msg.x2, msg.y2 = x1, y1, x2, y2
-            msg.x1, msg.y1, msg.x2, msg.y2 = int(x1), int(y1), int(x2), int(y2)
-            msg.cx, msg.cy = float(cx), float(cy)
-            msg.depth_m = float('nan')
-            msg.kpt_count = int(len(kpx))
-            msg.kpt_x = [float(x) for x in kpx]
-            msg.kpt_y = [float(y) for y in kpy]
-            if len(kpc) == len(kpx):
-                msg.kpt_conf = [float(c) for c in kpc]
-            else:
-                msg.kpt_conf = [float(-1.0)] * msg.kpt_count
-            msg.kpt_cam_xyz = []   # RGB에는 3D 없음
-
-            self.vs_det_pub_rgb.publish(msg)
-        # publish debug image anyway
-        img_msg = self.bridge.cv2_to_imgmsg(frame, encoding='bgr8')
-        img_msg.header.stamp = stamp
-        img_msg.header.frame_id = self.get_parameter('rgb_camera_frame').value
-        self.vs_img_pub_rgb.publish(img_msg)
-
-    def _process_rgbd_frame(self):
-        if self.rgb_img is None or self.depth_img is None or self.cam_info is None:
-            self.get_logger().debug("[vs/rgbd] waiting for rgb/depth/camera_info")
-            return
-        cv_img = self.bridge.imgmsg_to_cv2(self.rgb_img, 'bgr8')
-        results = self.model.predict(source=cv_img, conf=0.2, save=False, verbose=False)
-        # bbox, conf, idx = self._best_box(results)
-        # kpx, kpy, kpc = self._extract_kpts(results, idx) if idx is not None else ([], [], [])
-        # bbox, conf = self._best_box(results)
-        # 다중 박스 중 이전 프레임과 일관성 유지하도록 선택
-        xyxy_list, conf_list = self._get_all_boxes(results)
-        idx = self._choose_track(self._prev_bbox_rgbd, xyxy_list, conf_list)
-        kpx, kpy, kpc = self._extract_kpts(results, idx) if idx is not None else ([], [], [])
-        # depth calc
-        # if bbox is not None:
-        #     x1, y1, x2, y2 = bbox
-        if idx is not None:
-            x1, y1, x2, y2 = xyxy_list[idx]
-            conf = conf_list[idx]
-            h, w = cv_img.shape[:2]
-            x1c = max(0, min(w-1, x1)); x2c = max(0, min(w-1, x2))
-            y1c = max(0, min(h-1, y1)); y2c = max(0, min(h-1, y2))
-            cxp, cyp = (x1c + x2c) * 0.5, (y1c + y2c) * 0.5
-            # depth_np = self.bridge.imgmsg_to_cv2(self.depth_img, 'passthrough').astype(np.float32) / 1000.0
-            # win = depth_np[y1c:y2c+1, x1c:x2c+1].reshape(-1)
-            # vals = win[(win > 0) & np.isfinite(win)]
-            # depth_m = float('nan')
-            # if vals.size > 0:
-            #     med  = np.median(vals)
-            #     mad  = np.median(np.abs(vals - med))
-            #     thresh = 3 * 1.4826 * mad if mad > 0 else np.inf
-            #     inliers = vals[np.abs(vals - med) < thresh]
-            #     sorted_vals = np.sort(inliers)
-            #     q25_len = max(1, int(len(sorted_vals) * 0.25))
-            #     depth_m = float(np.mean(sorted_vals[:q25_len]))
-            # 경량화된 depth: bbox 중앙 3x3 median
-            depth_np = self.bridge.imgmsg_to_cv2(self.depth_img, 'passthrough').astype(np.float32) / 1000.0
-            depth_m = self._robust_depth_at(cxp, cyp, depth_np)
-            # draw
-            cv2.rectangle(cv_img, (x1c, y1c), (x2c, y2c), (0,255,0), 2)
-            cv2.circle(cv_img, (int(cxp), int(cyp)), 3, (0,0,255), -1)
-            cv2.putText(cv_img, f"{conf:.2f}, {depth_m:.3f}m", (x1c, max(0, y1c-5)),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255,255,255), 1)
-            # draw keypoints & compute per-kp depth/3D
-            fx = self.cam_info.k[0];  fy = self.cam_info.k[4]
-            cx0 = self.cam_info.k[2]; cy0 = self.cam_info.k[5]
-            kpt_points_3d = []
-            for i in range(len(kpx)):
-                u, v = float(kpx[i]), float(kpy[i])
-                if u <= 0 or v <= 0:
-                    # invalid pixel → NaN
-                    kpt_points_3d.append(Point(x=float('nan'), y=float('nan'), z=float('nan')))
-                    continue
-                d = self._robust_depth_at(u, v, depth_np)
-                if not np.isfinite(d):
-                    kpt_points_3d.append(Point(x=float('nan'), y=float('nan'), z=float('nan')))
-                    continue
-                # optical frame (REP-103): x→right, y→down, z→forward
-                x_opt = (u - cx0) * d / fx
-                y_opt = (v - cy0) * d / fy
-                z_opt = d
-                # optical → body(camera_link): X=+z, Y=−x, Z=−y
-                X =  z_opt
-                Y = -x_opt
-                Z = -y_opt
-                kpt_points_3d.append(Point(x=float(X), y=float(Y), z=float(Z)))
-                # overlay keypoint dot
-                cv2.circle(cv_img, (int(u), int(v)), 3, (0, 0, 255), -1)
-            # publish msg
-            msg = DetectionBBox()
-            msg.header = self.rgb_img.header
-            msg.camera_name = "rgbd"
-            msg.conf = float(conf)
-            msg.x1, msg.y1, msg.x2, msg.y2 = int(x1c), int(y1c), int(x2c), int(y2c)
-            msg.cx, msg.cy = float(cxp), float(cyp)
-            msg.depth_m = depth_m
-            msg.kpt_count = int(len(kpx))
-            msg.kpt_x = [float(x) for x in kpx]
-            msg.kpt_y = [float(y) for y in kpy]
-            if len(kpc) == len(kpx):
-                msg.kpt_conf = [float(c) for c in kpc]
-            else:
-                msg.kpt_conf = [float(-1.0)] * msg.kpt_count
-            msg.kpt_cam_xyz = kpt_points_3d
-            self.vs_det_pub_rgbd.publish(msg)
-            # prev 갱신
-            self._prev_bbox_rgbd = [int(x1c), int(y1c), int(x2c), int(y2c)]
-        else:
-            self._prev_bbox_rgbd = None
-        # debug image
-        dbg = self.bridge.cv2_to_imgmsg(cv_img, encoding='bgr8')
-        dbg.header = self.rgb_img.header
-        self.vs_img_pub_rgbd.publish(dbg)
 
 def main():
     # rclpy.init()

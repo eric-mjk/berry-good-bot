@@ -91,7 +91,10 @@ int main(int argc, char **argv)
                 factory.registerNodeType<strawberry_bt_nodes::GripperControlBT>("GripperAction");
                 factory.registerNodeType<strawberry_bt_nodes::VisualServoingBT>("VisualServoing");
             } else if (type_name == "utility_nodes") {
-                RCLCPP_INFO(node->get_logger(), "Registering Utility Nodes (PoseListInit, PoseListNext)");
+                RCLCPP_INFO(node->get_logger(), "Registering Utility Nodes (PoseListInit, PoseListNext, FruitToBasketPose, WaitSeconds)");
+                factory.registerNodeType<strawberry_bt_nodes::FruitToBasketPose>("FruitToBasketPose");
+                factory.registerNodeType<strawberry_bt_nodes::WaitSeconds>("WaitSeconds");
+
                 factory.registerNodeType<strawberry_bt_nodes::PoseListInit>("PoseListInit");
                 factory.registerNodeType<strawberry_bt_nodes::PoseListNext>("PoseListNext");
  

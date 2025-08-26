@@ -79,7 +79,7 @@ class DatasetCapture2Hz(Node):
         self.declare_parameter("top_grip_roi_xywh", [498, 250, 310, 228])
 
         self.declare_parameter("out_root", os.path.expanduser("~/ibvs_dataset"))
-        self.declare_parameter("hz", 2.0)
+        self.declare_parameter("hz", 0.50)
         self.declare_parameter("save_full", True)
         self.declare_parameter("save_roi", False)
         self.declare_parameter("save_depth", False)
@@ -164,13 +164,29 @@ class DatasetCapture2Hz(Node):
         with self._lock:
             self._bot_bgr = bgr
 
+    # def _cb_top_rgb(self, msg: Image):
+    #     try:
+    #         # bgr = self.bridge.imgmsg_to_cv2(msg, 'bgr8')
+    #         bgr = self.bridge.imgmsg_to_cv2(msg, desired_encoding='passthrough')
+    #     except Exception:
+    #         # bgr = self.bridge.imgmsg_to_cv2(msg, desired_encoding='bgr8')
+    #         bgr = self.bridge.imgmsg_to_cv2(msg, desired_encoding='passthrough')
+
     def _cb_top_rgb(self, msg: Image):
+        # 항상 BGR로 정규화 (rgb8로 오는 경우 색상 뒤집힘 방지)
         try:
-            # bgr = self.bridge.imgmsg_to_cv2(msg, 'bgr8')
-            bgr = self.bridge.imgmsg_to_cv2(msg, desired_encoding='passthrough')
+            bgr = self.bridge.imgmsg_to_cv2(msg, desired_encoding='bgr8')
         except Exception:
-            # bgr = self.bridge.imgmsg_to_cv2(msg, desired_encoding='bgr8')
-            bgr = self.bridge.imgmsg_to_cv2(msg, desired_encoding='passthrough')
+            arr = self.bridge.imgmsg_to_cv2(msg, desired_encoding='passthrough')
+            enc = getattr(msg, "encoding", "").lower()
+            if enc == "rgb8":
+                bgr = cv2.cvtColor(arr, cv2.COLOR_RGB2BGR)
+            elif enc == "rgba8":
+                bgr = cv2.cvtColor(arr, cv2.COLOR_RGBA2BGR)
+            elif enc == "bgra8":
+                bgr = cv2.cvtColor(arr, cv2.COLOR_BGRA2BGR)
+            else:
+                bgr = arr
         with self._lock:
             self._top_bgr = bgr
             if self._stamp_from_top_hdr:

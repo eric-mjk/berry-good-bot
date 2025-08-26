@@ -6,6 +6,8 @@
 #include <iostream>
 #include <optional>
 #include <string>
+#include <algorithm>   // std::transform
+#include <cctype>      // std::tolower
 #include <behaviortree_cpp_v3/bt_factory.h>
 #include <rclcpp/rclcpp.hpp>
 #include <rclcpp_action/rclcpp_action.hpp>
@@ -152,7 +154,10 @@ public:
   static BT::PortsList providedPorts()
   {
     return {
-      BT::InputPort<double>("timeout", "15.0")
+      BT::InputPort<double>("timeout", "15.0"),
+      // 액션 결과를 블랙보드로 내보내기
+      BT::OutputPort<std::string>("fruit_class"),
+      BT::OutputPort<std::string>("basket_pose")
     };
   }
 
@@ -189,7 +194,7 @@ public:
     goal.timeout_sec = timeout_s;
 
     // Humble API: 두 번째 인자는 SendGoalOptions여야 합니다.
-    typename rclcpp_action::Client<VisualServoing>::SendGoalOptions send_opts;
+    rclcpp_action::Client<VisualServoing>::SendGoalOptions send_opts;
     // (선택) 피드백 콜백
     send_opts.feedback_callback =
       [](GH::SharedPtr, const std::shared_ptr<const VisualServoing::Feedback> fb)
@@ -236,9 +241,39 @@ public:
         std::cerr << "[VisualServoingBT] result is null\n";
         return BT::NodeStatus::FAILURE;
       }
-      std::cout << "[VisualServoingBT] done: success=" << (wrapped.result->success ? "true":"false")
-                << "  msg='" << wrapped.result->message << "'\n";
-      return wrapped.result->success ? BT::NodeStatus::SUCCESS : BT::NodeStatus::FAILURE;
+      // std::cout << "[VisualServoingBT] done: success=" << (wrapped.result->success ? "true":"false")
+      //           << "  msg='" << wrapped.result->message << "'\n";
+      // return wrapped.result->success ? BT::NodeStatus::SUCCESS : BT::NodeStatus::FAILURE;
+      const bool ok = wrapped.result->success;
+      const auto msg = wrapped.result->message;
+      std::string fruit = wrapped.result->fruit_class;     // 새 필드
+      const double conf_sum = wrapped.result->fruit_class_conf_sum; // 새 필드(로깅용)
+
+      // 소문자 정규화
+      std::string fruit_lc = fruit;
+      std::transform(fruit_lc.begin(), fruit_lc.end(), fruit_lc.begin(),
+                     [](unsigned char c){ return static_cast<char>(std::tolower(c)); });
+
+      // 기본 매핑: strawberry→basket_s, apple→basket_a, orange→basket_o (그 외: basket)
+      std::string basket_pose = "basket";
+      if (fruit_lc == "strawberry" || fruit_lc == "berry" || fruit_lc == "strawberries" || fruit_lc == "0") {
+        basket_pose = "basket_s";
+      } else if (fruit_lc == "apple" || fruit_lc == "1") {
+        basket_pose = "basket_a";
+      } else if (fruit_lc == "orange" || fruit_lc == "2") {
+        basket_pose = "basket_o";
+      }
+
+      // 블랙보드로 결과 전달(없더라도 빈 문자열/기본값 세팅)
+      setOutput("fruit_class", fruit);
+      setOutput("basket_pose", basket_pose);
+
+      std::cout << "[VisualServoingBT] done: success=" << (ok ? "true":"false")
+                << "  msg='" << msg << "'  fruit='" << fruit
+                << "'  conf_sum=" << conf_sum
+                << "  basket_pose='" << basket_pose << "'\n";
+
+      return ok ? BT::NodeStatus::SUCCESS : BT::NodeStatus::FAILURE;
     } catch (const std::exception& e) {
       std::cerr << "[VisualServoingBT] get_result threw: " << e.what() << "\n";
       return BT::NodeStatus::FAILURE;

@@ -10,6 +10,7 @@
 #include <vector>
 #include <string>
 #include <algorithm>
+#include <chrono>
 
 namespace strawberry_bt_nodes {
 
@@ -116,5 +117,80 @@ public:
     return BT::NodeStatus::SUCCESS;
   }
 };
+
+// ------------------------------------------------------------
+// FruitToBasketPose
+//  - 입력: fruit("{fruit_class}")
+//  - 출력: basket("{basket_pose}")  // 예: strawberry->basket_s, apple->basket_a, orange->basket_o
+//  - 매핑이 필요 없으면 VisualServoingBT에서 이미 세팅되므로 생략 가능.
+// ------------------------------------------------------------
+class FruitToBasketPose : public BT::SyncActionNode
+{
+public:
+  FruitToBasketPose(const std::string& name, const BT::NodeConfiguration& cfg)
+  : BT::SyncActionNode(name, cfg) {}
+
+  static BT::PortsList providedPorts(){
+    return {
+      BT::InputPort<std::string>("fruit"),
+      BT::OutputPort<std::string>("basket")
+    };
+  }
+
+  BT::NodeStatus tick() override {
+    std::string fruit; (void)getInput("fruit", fruit);
+    std::string lc = fruit;
+    std::transform(lc.begin(), lc.end(), lc.begin(), [](unsigned char c){ return static_cast<char>(std::tolower(c)); });
+    std::string pose = "basket";
+    if (lc == "strawberry" || lc == "berry" || lc == "strawberries" || lc == "0")      pose = "basket_s";
+    else if (lc == "apple" || lc == "1")                                               pose = "basket_a";
+    else if (lc == "orange" || lc == "2")                                              pose = "basket_o";
+    setOutput("basket", pose);
+    return BT::NodeStatus::SUCCESS;
+  }
+};
+
+// ------------------------------------------------------------
+// WaitSeconds
+//  - 입력: seconds="2.0" (기본 1.0)
+//  - 논블로킹 대기: 최초 tick에서 시작시간 기록 → 경과 전에는 RUNNING, 지나면 SUCCESS
+//  - 그리퍼 OPEN 직후 "그대로 멈춘 상태로 몇 초 대기" 용
+// ------------------------------------------------------------
+class WaitSeconds : public BT::StatefulActionNode
+{
+public:
+  WaitSeconds(const std::string& name, const BT::NodeConfiguration& config)
+  : BT::StatefulActionNode(name, config) {}
+
+  static BT::PortsList providedPorts(){
+    return { BT::InputPort<double>("seconds", "1.0") };
+  }
+
+  BT::NodeStatus onStart() override {
+    if(!getInput("seconds", seconds_)) {
+      seconds_ = 1.0;
+    }
+    start_ = std::chrono::steady_clock::now();
+    return BT::NodeStatus::RUNNING;
+  }
+
+  BT::NodeStatus onRunning() override {
+    const auto now = std::chrono::steady_clock::now();
+    const double elapsed = std::chrono::duration_cast<std::chrono::duration<double>>(now - start_).count();
+    if (elapsed >= seconds_) {
+      return BT::NodeStatus::SUCCESS;
+    }
+    return BT::NodeStatus::RUNNING;
+  }
+
+  void onHalted() override {
+    // do nothing
+  }
+
+private:
+  double seconds_{1.0};
+  std::chrono::steady_clock::time_point start_;
+};
+
 
 } // namespace strawberry_bt_nodes

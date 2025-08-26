@@ -6,6 +6,8 @@ float64 timeout_sec
 # Result
 bool success
 string message
+string fruit_class
+float64 fruit_class_conf_sum
 ---
 # Feedback
 # - time_elapsed: 시작 이후 경과 시간(초)

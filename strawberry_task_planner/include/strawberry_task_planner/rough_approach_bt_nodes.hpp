@@ -47,14 +47,25 @@ public:
   static BT::PortsList providedPorts()
   {
     return {
-      BT::InputPort<double>("offset_z", "camera Z-axis retreat [m]"),
+      BT::InputPort<double>("offset_z",     "camera Z-axis retreat [m]"),
+      BT::InputPort<int>("stage",           "1 for first, 2 for second rough approach"),
+      BT::InputPort<double>("prev_x",       "prev target x (base_link) for stage 2"),
+      BT::InputPort<double>("prev_y",       "prev target y (base_link) for stage 2"),
+      BT::InputPort<double>("prev_z",       "prev target z (base_link) for stage 2"),
+      BT::InputPort<double>("prev_gate_m",  "gating radius (m) for stage 2"),
+
       BT::OutputPort<double>("ax"),
       BT::OutputPort<double>("ay"),
       BT::OutputPort<double>("az"),
       BT::OutputPort<double>("qx"),
       BT::OutputPort<double>("qy"),
       BT::OutputPort<double>("qz"),
-      BT::OutputPort<double>("qw")
+      BT::OutputPort<double>("qw"),
+
+      // 과실 중심(base_link)을 블랙보드로도 저장하여 다음 단계 앵커로 사용
+      BT::OutputPort<double>("tx"),
+      BT::OutputPort<double>("ty"),
+      BT::OutputPort<double>("tz")
     };
   }
 
@@ -65,7 +76,18 @@ public:
       return BT::NodeStatus::FAILURE;
     }
     double offset = 0.05;
+    int    stage  = 1;
+    double prev_x=std::numeric_limits<double>::quiet_NaN();
+    double prev_y=std::numeric_limits<double>::quiet_NaN();
+    double prev_z=std::numeric_limits<double>::quiet_NaN();
+    double prev_gate = 0.12;
+
     (void)getInput<double>("offset_z", offset);
+    (void)getInput<int>("stage", stage);
+    (void)getInput<double>("prev_x", prev_x);
+    (void)getInput<double>("prev_y", prev_y);
+    (void)getInput<double>("prev_z", prev_z);
+    (void)getInput<double>("prev_gate_m", prev_gate);
 
     if (!client_) {
       client_ = rclcpp_action::create_client<DetectStrawberry>(g_ros_node, "detect_strawberry");
@@ -94,6 +116,11 @@ public:
 
     DetectStrawberry::Goal goal;
     goal.offset_z = offset;
+    goal.approach_stage = static_cast<uint8_t>(stage);
+    goal.prev_target_base.x = std::isfinite(prev_x) ? prev_x : 0.0;
+    goal.prev_target_base.y = std::isfinite(prev_y) ? prev_y : 0.0;
+    goal.prev_target_base.z = std::isfinite(prev_z) ? prev_z : 0.0;
+    goal.prev_gate_m = prev_gate;
 
     auto gh_fut = client_->async_send_goal(goal);
     if (gh_fut.wait_for(5s) != std::future_status::ready) {
@@ -111,7 +138,6 @@ public:
       return BT::NodeStatus::FAILURE;
     }
     auto wrapped = res_fut.get();
-    // const auto& ps = wrapped.result->approach_pose_base;
 
     // 1) 액션 결과 코드 확인 (SUCCEEDED 외에는 실패 취급)
     if (wrapped.code != rclcpp_action::ResultCode::SUCCEEDED) {
@@ -122,6 +148,7 @@ public:
     }
 
     const auto& ps = wrapped.result->approach_pose_base;
+    const auto& tc = wrapped.result->strawberry_center_base;
 
     // 2) 결과 포즈 유효성 검사 (NaN/inf 및 원점(0,0,0) 보호)
     const double ax = ps.pose.position.x;
@@ -142,6 +169,12 @@ public:
     setOutput("qy", ps.pose.orientation.y);
     setOutput("qz", ps.pose.orientation.z);
     setOutput("qw", ps.pose.orientation.w);
+
+    // 과실 중심(다음 단계 앵커)
+    setOutput("tx", tc.x);
+    setOutput("ty", tc.y);
+    setOutput("tz", tc.z);
+
 
     std::cout << "[DetectApproachPose] approach(base_link): "
               << ax << ", " << ay << ", " << az << "\n";

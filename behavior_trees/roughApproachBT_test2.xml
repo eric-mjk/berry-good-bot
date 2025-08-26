@@ -3,13 +3,14 @@
   <BehaviorTree ID="RoughApproachMain">
     <Sequence name="RoughApproachSequence">
       <!-- 1) 미리 자세 -->
-      <MoveToNamedPose pose="ready"/>
+      <MoveToNamedPose pose="ready2"/>
       <WaitRealRobotSync tolerance="0.01" stable_time="0.5" timeout="30.0"/>
 
-      <!-- 2) 탐지 → 접근점(base_link) 산출, 블랙보드에 저장 -->
-      <DetectApproachPose offset_z="0.05"
+      <!-- 2) 1단계 탐지 → 접근점(base_link) 산출, 블랙보드에 저장 -->
+      <DetectApproachPose stage="1" offset_z="0.05"
                           ax="{appr_x}" ay="{appr_y}" az="{appr_z}"
-                          qx="{appr_qx}" qy="{appr_qy}" qz="{appr_qz}" qw="{appr_qw}"/>
+                          qx="{appr_qx}" qy="{appr_qy}" qz="{appr_qz}" qw="{appr_qw}"
+                          tx="{tar_x}" ty="{tar_y}" tz="{tar_z}"/>
 
       <!-- 3) 서보로 접근 (블랙보드 값 사용) -->
       <ServoToTargetPose ax="{appr_x}" ay="{appr_y}" az="{appr_z}"
@@ -21,10 +22,13 @@
                          pos_tol="0.01" ori_tol="0.05"
                          stable_time="0.5" timeout="40.0"/>
 
-      <!-- 4) 탐지 → 접근점(base_link) 산출, 블랙보드에 저장 -->
-      <DetectApproachPose offset_z="0.01"
+      <!-- 4) 2단계 탐지(앵커 고정) → 접근점(base_link) 산출, 블랙보드 갱신 -->
+      <DetectApproachPose stage="2" offset_z="0.01"
+                          prev_x="{tar_x}" prev_y="{tar_y}" prev_z="{tar_z}"
+                          prev_gate_m="0.12"
                           ax="{appr_x}" ay="{appr_y}" az="{appr_z}"
-                          qx="{appr_qx}" qy="{appr_qy}" qz="{appr_qz}" qw="{appr_qw}"/>
+                          qx="{appr_qx}" qy="{appr_qy}" qz="{appr_qz}" qw="{appr_qw}"
+                          tx="{tar_x}" ty="{tar_y}" tz="{tar_z}"/>
 
       <!-- 5) 서보로 접근 (블랙보드 값 사용) -->
       <ServoToTargetPose ax="{appr_x}" ay="{appr_y}" az="{appr_z}"

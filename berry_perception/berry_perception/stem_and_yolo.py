@@ -158,6 +158,7 @@ def segment_strawberry(
         ((0, 100, 130), (15, 255, 220)),   # red low
         ((0, 200, 100), (15, 255, 200)),   # red high
         ((15,  200, 110), (25,  255, 155)),   # yellowish
+        ((0, 150, 90), (12, 210, 140)),   # red apple
     ),
     morph_open: int = 3,
     morph_close: int = 5,

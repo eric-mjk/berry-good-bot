@@ -12,9 +12,19 @@ def main():
     parser = argparse.ArgumentParser()
     sub = parser.add_subparsers(dest="cmd", required=True)
 
-    p_det = sub.add_parser("detect", help="딸기 탐지 + 접근점 반환")
+    p_det = sub.add_parser("detect", help="딸기 탐지 + 접근점 반환 (stage1/2 지원)")
     p_det.add_argument("--offset", type=float, default=0.05,
                        help="camera Z-축에서 얼마나 뒤로 물러날지[m]")
+    p_det.add_argument("--stage", type=int, choices=[1,2], default=1,
+                       help="1: 1차 rough approach, 2: 2차 rough approach")
+    p_det.add_argument("--prev-x", type=float, default=0.0,
+                       help="stage=2에서 사용할 이전 타겟 anchor X (base_link)")
+    p_det.add_argument("--prev-y", type=float, default=0.0,
+                       help="stage=2에서 사용할 이전 타겟 anchor Y (base_link)")
+    p_det.add_argument("--prev-z", type=float, default=0.0,
+                       help="stage=2에서 사용할 이전 타겟 anchor Z (base_link)")
+    p_det.add_argument("--gate", type=float, default=0.12,
+                       help="stage=2에서 anchor로부터 허용 반경[m] (0이면 무시)")
 
     p_grip = sub.add_parser("grip", help="그리퍼 열기/닫기")
     p_grip.add_argument("mode", choices=["open", "close"])
@@ -42,12 +52,48 @@ def main():
         ac = ActionClient(node, DetectStrawberry, "detect_strawberry")
         node.get_logger().info("[CLI] waiting for detect_strawberry …")
         ac.wait_for_server()
-        goal = DetectStrawberry.Goal(offset_z=args.offset)
-        gh = ac.send_goal_async(goal)
-        rclpy.spin_until_future_complete(node, gh)
-        res = gh.result().get_result_async()
-        rclpy.spin_until_future_complete(node, res)
-        node.get_logger().info(f"[CLI] approach_pose_base →\n{res.result().result.approach_pose_base}")
+
+        goal = DetectStrawberry.Goal()
+        goal.offset_z = float(args.offset)
+        # 새 필드들 세팅 (stage 1/2 분기용)
+        goal.approach_stage = int(args.stage)
+        goal.prev_target_base.x = float(args.prev_x)
+        goal.prev_target_base.y = float(args.prev_y)
+        goal.prev_target_base.z = float(args.prev_z)
+        goal.prev_gate_m = float(args.gate)
+
+        node.get_logger().info(f"[CLI] send goal: offset={goal.offset_z:.3f}, "
+                               f"stage={goal.approach_stage}, "
+                               f"prev=({goal.prev_target_base.x:.3f},"
+                               f"{goal.prev_target_base.y:.3f},"
+                               f"{goal.prev_target_base.z:.3f}), "
+                               f"gate={goal.prev_gate_m:.3f}")
+
+        gh_fut = ac.send_goal_async(goal)
+        rclpy.spin_until_future_complete(node, gh_fut)
+        gh = gh_fut.result()
+        if not gh.accepted:
+            node.get_logger().error("[CLI] detect_strawberry goal REJECTED")
+            rclpy.shutdown()
+            return
+
+        res_fut = gh.get_result_async()
+        rclpy.spin_until_future_complete(node, res_fut)
+        result_msg = res_fut.result().result
+
+        node.get_logger().info("[CLI] approach_pose_base →")
+        node.get_logger().info(f"  pos = ({result_msg.approach_pose_base.pose.position.x:.3f}, "
+                               f"{result_msg.approach_pose_base.pose.position.y:.3f}, "
+                               f"{result_msg.approach_pose_base.pose.position.z:.3f})")
+        node.get_logger().info(f"  ori = ({result_msg.approach_pose_base.pose.orientation.x:.3f}, "
+                               f"{result_msg.approach_pose_base.pose.orientation.y:.3f}, "
+                               f"{result_msg.approach_pose_base.pose.orientation.z:.3f}, "
+                               f"{result_msg.approach_pose_base.pose.orientation.w:.3f})")
+        try:
+            tc = result_msg.strawberry_center_base
+            node.get_logger().info(f"[CLI] strawberry_center_base = ({tc.x:.3f}, {tc.y:.3f}, {tc.z:.3f})")
+        except Exception:
+            node.get_logger().warn("[CLI] result: strawberry_center_base not available in action result")
 
     elif args.cmd == "grip":
         want_open = (args.mode == "open")
@@ -151,15 +197,34 @@ def main():
         # 최종 결과 수신/로그
         rclpy.spin_until_future_complete(node, res_future)
         result = res_future.result().result
-        node.get_logger().info(f"[CLI] visual_servoing 종료: success={result.success}  message='{result.message}'")
- 
+        # 기본 종료 로그
+        node.get_logger().info(
+            f"[CLI] visual_servoing 종료: success={result.success}  message='{result.message}'"
+        )
+        # (있으면) 과일 클래스 집계 결과 출력
+        fruit_cls = getattr(result, "fruit_class", "")
+        fruit_sum = getattr(result, "fruit_class_conf_sum", 0.0)
+        if fruit_cls or fruit_sum:
+            try:
+                node.get_logger().info(
+                    f"[CLI] fruit_class='{fruit_cls}'  conf_sum={float(fruit_sum):.3f}"
+                )
+            except Exception:
+                node.get_logger().info(
+                    f"[CLI] fruit_class='{fruit_cls}'  conf_sum={fruit_sum}"
+                )
+
     rclpy.shutdown()
 if __name__ == "__main__":
     main()
 
 # 사용 예:
-# # 딸기 탐지
-# ros2 run berry_perception debug_cli detect --offset 0.05
+# # 딸기 탐지 (stage1: conf≥threshold 후보 중 EEF 최근접)
+# ros2 run berry_perception debug_cli detect --offset 0.05 --stage 1
+# # 딸기 탐지 (stage2: 이전 타겟 기준 최근접 + 게이팅 0.12m)
+# ros2 run berry_perception debug_cli detect --offset 0.01 --stage 2 --prev-x 0.35 --prev-y 0.05 --prev-z 0.18 --gate 0.12
+
+
 # # 그리퍼 닫기
 # ros2 run berry_perception debug_cli grip close
 # ros2 run berry_perception debug_cli grip open

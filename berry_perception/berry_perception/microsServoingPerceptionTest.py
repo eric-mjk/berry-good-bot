@@ -31,7 +31,7 @@ class IBVSPerceptionTest(Node):
         self.declare_parameter('top_info_topic',  '/camera/camera/color/camera_info')
 
         self.declare_parameter('top_infer_hz', 3.0)                 # 상단 YOLO 추론 주기(Hz)
-        self.declare_parameter('top_grip_roi_xywh', [498,250, 310, 228])  # 상단 gripper ROI (x,y,w,h)
+        self.declare_parameter('top_grip_roi_xywh', [498,250, 180, 228])  # 상단 gripper ROI (x,y,w,h)
         self.declare_parameter('bottom_infer_hz', 3.0)   # 하단 YOLO 추론 주기(Hz)
         self.declare_parameter('bottom_grip_roi_xywh', [63, 83, 360, 471])  # 하단 gripper ROI (x,y,w,h)
 
@@ -41,7 +41,7 @@ class IBVSPerceptionTest(Node):
         self.declare_parameter('bottom_rgb_topic', '/bottom_cam/image_raw')
 
         # YOLO
-        self.declare_parameter('yolo_model_rel', 'model/model1.pt')
+        self.declare_parameter('yolo_model_rel', 'model/model3.pt')
         self.declare_parameter('yolo_conf', 0.01)
         self.declare_parameter('yolo_sim_conf_thresh', 0.30)  # (sim + conf) 유효성 임계값
 
@@ -79,7 +79,8 @@ class IBVSPerceptionTest(Node):
         self.yolo.model.to('cuda:0' if torch.cuda.is_available() else 'cpu')
         self.yolo_conf = float(self.get_parameter('yolo_conf').value)
         self.sim_conf_thresh = float(self.get_parameter('yolo_sim_conf_thresh').value)
- 
+        # 클래스 이름 매핑
+        self.cls_names = self._get_class_names(self.yolo)
 
         # 하단 추론 주기 제어
         self.bottom_infer_hz = float(self.get_parameter('bottom_infer_hz').value)
@@ -159,6 +160,33 @@ class IBVSPerceptionTest(Node):
     def _euclid(p, q):
         return float(np.hypot(p[0]-q[0], p[1]-q[1]))
 
+    @staticmethod
+    def _get_class_names(yolo):
+        names = getattr(yolo, "names", None)
+        if names is None:
+            names = getattr(getattr(yolo, "model", None), "names", None)
+        if names is None:
+            names = {}
+        if isinstance(names, list):
+            names = {i: n for i, n in enumerate(names)}
+        return names
+
+    @staticmethod
+    def _draw_transparent_polyline(dst_bgr, pts, colors, thickness=2, alpha=0.5):
+        """
+        pts: [(x,y), ...]  (인덱스 순서대로 선 연결; y0->y1, y1->y2)
+        colors: 각 세그먼트 색상 리스트 (BGR)
+        """
+        if pts is None or len(pts) < 2:
+            return dst_bgr
+        overlay = dst_bgr.copy()
+        for i in range(len(pts) - 1):
+            p1 = (int(pts[i][0]),   int(pts[i][1]))
+            p2 = (int(pts[i+1][0]), int(pts[i+1][1]))
+            col = colors[i % len(colors)]
+            cv2.line(overlay, p1, p2, col, thickness, cv2.LINE_AA)
+        return cv2.addWeighted(overlay, alpha, dst_bgr, 1.0 - alpha, 0)
+
     # ───── Main timer loop ───────────────────────
     def tick(self):
         # 1) 상단 RGB-D
@@ -174,12 +202,14 @@ class IBVSPerceptionTest(Node):
             if do_infer_t:
                 # ── 상단: YOLO + ROI 필터 + Segmentation + Keypoints
                 results_t = self.yolo.predict(source=bgr, conf=self.yolo_conf, save=False, verbose=False, max_det=10)
-                xyxy_t, conf_t, kpts_t = self._get_boxes_and_kpts(results_t)
+                # xyxy_t, conf_t, kpts_t = self._get_boxes_and_kpts(results_t)
+                xyxy_t, conf_t, kpts_t, cls_t = self._get_boxes_and_kpts(results_t)
                 # ROI (상단)
                 tgx, tgy, tgw, tgh = self.top_grip_roi_xywh
                 tgr_xyxy = self._xywh_to_xyxy(tgx, tgy, tgw, tgh)
                 cv2.rectangle(bgr, (tgx,tgy), (tgx+tgw, tgy+tgh), (255,255,255), 1)
-                cv2.putText(bgr, "GRIP ROI", (tgx, max(0,tgy-6)), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255,255,255), 1)
+                # cv2.putText(bgr, "GRIP ROI", (tgx, max(0,tgy-6)), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255,255,255), 1)
+                cv2.putText(bgr, "GRIP ROI", (tgx, max(0,tgy-6)), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (255,255,255), 1)
 
                 # ── 선택 로직: 세그먼트 기반 ROI 유사도 최대 박스 선택
                 # selected_idx_t, sim_iou_t, seg_roi_t, seg_t = select_yolo_by_roi_similarity(
@@ -218,10 +248,21 @@ class IBVSPerceptionTest(Node):
                     conf_val = conf_t[selected_idx_t] if (conf_t and selected_idx_t < len(conf_t)) else 0.0
                     # cv2.putText(vis_t, f"conf={conf_val:.2f}, sim={sim_iou_t:.2f}", (tx1, max(0, ty1-22)),
 
-                    cv2.putText(vis_t, f"conf={conf_val:.2f}, sim={sim_iou_t:.2f}, score={(conf_val+sim_iou_t):.2f}", (tx1, max(0, ty1-22)),                                cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0,255,0), 1)
+                    # cv2.putText(vis_t, f"conf={conf_val:.2f}, sim={sim_iou_t:.2f}, score={(conf_val+sim_iou_t):.2f}", (tx1, max(0, ty1-22)),                                cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0,255,0), 1)
+                    # cv2.putText(vis_t, f"YOLO OK ({tcx_i},{tcy_i})", (tx1, max(0, ty1-6)),
+                    #             cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0,255,0), 2)
+                    cv2.putText(vis_t, f"conf={conf_val:.2f}, sim={sim_iou_t:.2f}, score={(conf_val+sim_iou_t):.2f}", (tx1, max(0, ty1-22)),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0,255,0), 1)
                     cv2.putText(vis_t, f"YOLO OK ({tcx_i},{tcy_i})", (tx1, max(0, ty1-6)),
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0,255,0), 2)
-
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0,255,0), 2)
+                    # ── 클래스 라벨(작은 글씨, 배경 박스)
+                    cls_id_t = int(cls_t[selected_idx_t]) if (cls_t and selected_idx_t < len(cls_t)) else -1
+                    cls_name_t = self.cls_names.get(cls_id_t, str(cls_id_t))
+                    label_t = f"{cls_name_t} {conf_val:.2f}"
+                    (tw, th), _ = cv2.getTextSize(label_t, cv2.FONT_HERSHEY_SIMPLEX, 0.45, 1)
+                    cv2.rectangle(vis_t, (tx1, ty1 - th - 6), (tx1 + tw + 2, ty1), (0,255,0), -1)
+                    cv2.putText(vis_t, label_t, (tx1 + 1, ty1 - 4),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0,0,0), 1)
                 else:
                     # 유효하지 않을 때 임계값/점수 표시
                     cv2.putText(vis_t, f"YOLO not valid (score={score_t:.2f} <= thr={self.sim_conf_thresh:.2f}) -> use GRIP ROI",
@@ -229,11 +270,22 @@ class IBVSPerceptionTest(Node):
 
                 # YOLO keypoints (상단) - 서로 다른 색
                 if yolo_valid_t and kpts_t and selected_idx_t < len(kpts_t):
+                    # palette = [(255,0,255), (255,255,0), (0,165,255)]  # magenta, cyan, orange (BGR)
+                    # for j,(kx,ky) in enumerate(kpts_t[selected_idx_t][:3]):
+                    #     cv2.circle(vis_t, (int(kx), int(ky)), 4, palette[j%3], -1)
+                    #     cv2.putText(vis_t, f"y{j}", (int(kx)+3, int(ky)-3),
+                    #                 cv2.FONT_HERSHEY_SIMPLEX, 0.45, palette[j%3], 1)
                     palette = [(255,0,255), (255,255,0), (0,165,255)]  # magenta, cyan, orange (BGR)
+                    kp_pts_t = []
                     for j,(kx,ky) in enumerate(kpts_t[selected_idx_t][:3]):
                         cv2.circle(vis_t, (int(kx), int(ky)), 4, palette[j%3], -1)
                         cv2.putText(vis_t, f"y{j}", (int(kx)+3, int(ky)-3),
                                     cv2.FONT_HERSHEY_SIMPLEX, 0.45, palette[j%3], 1)
+                        kp_pts_t.append((kx,ky))
+                    # y0->y1->y2 반투명 선
+                    if len(kp_pts_t) >= 2:
+                        vis_t = self._draw_transparent_polyline(vis_t, kp_pts_t, palette, thickness=2, alpha=0.5)
+
                 self._top_last_overlay = vis_t.copy()
                 top_dbg = vis_t
                 self._top_last_infer_ts = now_t
@@ -272,13 +324,15 @@ class IBVSPerceptionTest(Node):
                 do_infer = (now - self._bot_last_infer_ts) >= (1.0 / self.bottom_infer_hz)
             if do_infer:
                 results_b = self.yolo.predict(source=frame, conf=self.yolo_conf, save=False, verbose=False, max_det=10)
-                xyxy_b, conf_b, kpts_b = self._get_boxes_and_kpts(results_b)
+                # xyxy_b, conf_b, kpts_b = self._get_boxes_and_kpts(results_b)
+                xyxy_b, conf_b, kpts_b, cls_b = self._get_boxes_and_kpts(results_b)
 
                 # ── Gripper ROI
                 gx, gy, gw, gh = self.grip_roi_xywh
                 gr_xyxy = self._xywh_to_xyxy(gx, gy, gw, gh)
                 cv2.rectangle(frame, (gx,gy), (gx+gw, gy+gh), (255,255,255), 1)
-                cv2.putText(frame, "GRIP ROI", (gx, max(0,gy-6)), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255,255,255), 1)
+                # cv2.putText(frame, "GRIP ROI", (gx, max(0,gy-6)), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255,255,255), 1)
+                cv2.putText(frame, "GRIP ROI", (gx, max(0,gy-6)), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (255,255,255), 1)
 
                 # # ── YOLO 유효성 필터: ROI와 겹치는 박스만
                 selected_idx, sim_iou, seg_roi, seg, score = select_yolo_by_roi_similarity(
@@ -315,11 +369,20 @@ class IBVSPerceptionTest(Node):
                     cx, cy = int((x1+x2)/2), int((y1+y2)/2)
                     cv2.circle(vis, (cx,cy), 4, (0,0,255), -1)
                     conf_val = conf_b[selected_idx] if (conf_b and selected_idx < len(conf_b)) else 0.0
-                    # cv2.putText(vis, f"conf={conf_val:.2f}, sim={sim_iou:.2f}", (x1, max(0, y1-22)),
-                    cv2.putText(vis, f"conf={conf_val:.2f}, sim={sim_iou:.2f}, score={(conf_val+sim_iou):.2f}", (x1, max(0, y1-22)),
+                    
+                    cv2.putText(vis, f"conf={conf_val:.2f}, sim={sim_iou:.2f}, score={(conf_val+sim_iou):.2f}", (x1, max(0, y1-22)),                                
                                 cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0,255,0), 1)
+                    
                     cv2.putText(vis, f"YOLO OK  ({cx},{cy})", (x1, max(0, y1-6)),
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0,255,0), 2)
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0,255,0), 2)
+                    # ── 클래스 라벨(작은 글씨, 배경 박스)
+                    cls_id_b = int(cls_b[selected_idx]) if (cls_b and selected_idx < len(cls_b)) else -1
+                    cls_name_b = self.cls_names.get(cls_id_b, str(cls_id_b))
+                    label_b = f"{cls_name_b} {conf_val:.2f}"
+                    (tw, th), _ = cv2.getTextSize(label_b, cv2.FONT_HERSHEY_SIMPLEX, 0.45, 1)
+                    cv2.rectangle(vis, (x1, y1 - th - 6), (x1 + tw + 2, y1), (0,255,0), -1)
+                    cv2.putText(vis, label_b, (x1 + 1, y1 - 4),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0,0,0), 1)
                 else:
                     self.prev_bbox_bot = None
                     # cv2.putText(vis, "YOLO not valid → use GRIP ROI", (gx, max(0,gy-22)),
@@ -330,11 +393,21 @@ class IBVSPerceptionTest(Node):
 
                 # ── YOLO keypoints 시각화 (3개 각기 다른 색)
                 if yolo_valid and kpts_b and selected_idx < len(kpts_b):
+                    # palette = [(255,0,255), (255,255,0), (0,165,255)]  # magenta, cyan, orange (BGR)
+                    # for j,(kx,ky) in enumerate(kpts_b[selected_idx][:3]):  # 최대 3개만
+                    #     cv2.circle(vis, (int(kx), int(ky)), 4, palette[j%3], -1)
+                    #     cv2.putText(vis, f"y{j}", (int(kx)+3, int(ky)-3),
+                    #                 cv2.FONT_HERSHEY_SIMPLEX, 0.45, palette[j%3], 1)
                     palette = [(255,0,255), (255,255,0), (0,165,255)]  # magenta, cyan, orange (BGR)
+                    kp_pts_b = []
                     for j,(kx,ky) in enumerate(kpts_b[selected_idx][:3]):  # 최대 3개만
                         cv2.circle(vis, (int(kx), int(ky)), 4, palette[j%3], -1)
                         cv2.putText(vis, f"y{j}", (int(kx)+3, int(ky)-3),
                                     cv2.FONT_HERSHEY_SIMPLEX, 0.45, palette[j%3], 1)
+                        kp_pts_b.append((kx,ky))
+                    # y0->y1->y2 반투명 선
+                    if len(kp_pts_b) >= 2:
+                        vis = self._draw_transparent_polyline(vis, kp_pts_b, palette, thickness=2, alpha=0.5)
 
                 # 결과 반영
                 self._bot_last_infer_ts = now
@@ -374,9 +447,10 @@ class IBVSPerceptionTest(Node):
           xyxy: List[List[int]]
           conf: List[float]
           kpts: List[List[Tuple[float, float]]]  # 각 인스턴스별 (x,y) 리스트, keypoints가 없으면 빈 리스트
+          clses: List[int]  # 클래스 id
         """
         if (not results) or (results[0].boxes is None) or (len(results[0].boxes) == 0):
-            return [], [], []
+            return [], [], [], []
         b = results[0].boxes
         # bbox / conf
         try:
@@ -387,6 +461,12 @@ class IBVSPerceptionTest(Node):
             conf = b.conf.numpy() if hasattr(b.conf, "numpy") else np.array(b.conf)
         xyxy = xyxy.astype(int).tolist()
         conf = [float(c) for c in conf.tolist()]
+        # classes
+        try:
+            cls = b.cls.detach().cpu().numpy().astype(int)
+        except Exception:
+            cls = np.array([]).astype(int)
+        clses = cls.tolist() if cls.size > 0 else [ -1 for _ in xyxy ]
         # keypoints (pose 모델일 경우)
         kpts = []
         kobj = getattr(results[0], "keypoints", None)
@@ -402,7 +482,7 @@ class IBVSPerceptionTest(Node):
                 kpts = [[] for _ in xyxy]
         else:
             kpts = [[] for _ in xyxy]
-        return xyxy, conf, kpts
+        return xyxy, conf, kpts, clses
 
 def main():
     rclpy.init()

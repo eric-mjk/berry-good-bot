@@ -10,9 +10,10 @@
       <GripperAction mode="open" timeout="8.0"/>
 
       <!-- 2) 탐지 → 접근점(base_link) 산출, 블랙보드에 저장 -->
-      <DetectApproachPose offset_z="0.05"
+      <DetectApproachPose stage="1" offset_z="0.05"
                           ax="{appr_x}" ay="{appr_y}" az="{appr_z}"
-                          qx="{appr_qx}" qy="{appr_qy}" qz="{appr_qz}" qw="{appr_qw}"/>
+                          qx="{appr_qx}" qy="{appr_qy}" qz="{appr_qz}" qw="{appr_qw}"
+                          tx="{tar_x}" ty="{tar_y}" tz="{tar_z}"/>
 
       <!-- 3) 서보로 접근 (블랙보드 값 사용) -->
       <ServoToTargetPose ax="{appr_x}" ay="{appr_y}" az="{appr_z}"
@@ -25,10 +26,14 @@
                          stable_time="0.5" timeout="40.0"/>
 
       <WaitRealRobotSync tolerance="0.01" stable_time="0.5" timeout="30.0"/>
+
       <!-- 4) 탐지 → 접근점(base_link) 산출, 블랙보드에 저장 -->
-      <DetectApproachPose offset_z="0.01"
+      <DetectApproachPose stage="2" offset_z="0.01"
+                          prev_x="{tar_x}" prev_y="{tar_y}" prev_z="{tar_z}"
+                          prev_gate_m="0.12"
                           ax="{appr_x}" ay="{appr_y}" az="{appr_z}"
-                          qx="{appr_qx}" qy="{appr_qy}" qz="{appr_qz}" qw="{appr_qw}"/>
+                          qx="{appr_qx}" qy="{appr_qy}" qz="{appr_qz}" qw="{appr_qw}"
+                          tx="{tar_x}" ty="{tar_y}" tz="{tar_z}"/>
 
       <!-- 5) 서보로 접근 (블랙보드 값 사용) -->
       <ServoToTargetPose ax="{appr_x}" ay="{appr_y}" az="{appr_z}"
@@ -43,20 +48,24 @@
       <WaitRealRobotSync tolerance="0.01" stable_time="0.5" timeout="30.0"/>
 
       <!-- 5) ★ IBVS Visual Servoing (딸기 상/하 카메라 시각 서보) -->
-      <VisualServoing timeout="40.0"/>
+      <!-- IBVS가 성공하면 fruit_class와 basket_pose를 블랙보드에 저장 -->
+      <VisualServoing timeout="40.0" fruit_class="{fruit}" basket_pose="{basket_pose}"/>
+ 
 
       <!-- 6) 그리퍼 닫기 -->
-      <GripperAction mode="close" timeout="8.0"/>
+      <!-- <GripperAction mode="close" timeout="8.0"/> -->
 
       <MoveToNamedPose pose="ready"/>
       <WaitRealRobotSync tolerance="0.01" stable_time="0.5" timeout="30.0"/>
 
       <!-- <GripperAction mode="close" timeout="8.0"/> -->
       
-      <!-- 4) 장바구니로 이동 후 홈 -->
-      <MoveToNamedPose pose="basket"/>
+      <!-- 4) 장바구니로 이동(과일 타입별 바구니로 분기) -->
+      <MoveToNamedPose pose="{basket_pose}"/>
       <WaitRealRobotSync tolerance="0.01" stable_time="0.5" timeout="30.0"/>
       <GripperAction mode="open" timeout="8.0"/>
+      <!-- 떨어뜨린 뒤 살짝 대기 -->
+      <WaitSeconds seconds="1.5"/>
 
       <MoveToNamedPose pose="ready"/>
       <WaitRealRobotSync tolerance="0.01" stable_time="0.5" timeout="30.0"/>

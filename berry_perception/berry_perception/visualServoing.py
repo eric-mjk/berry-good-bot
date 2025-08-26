@@ -75,7 +75,7 @@ class IBVSBottomServo(Node):
         self.declare_parameter("top_rgb_topic",   "/camera/camera/color/image_raw")
         self.declare_parameter("top_depth_topic", "/camera/camera/aligned_depth_to_color/image_raw")
         self.declare_parameter("top_info_topic",  "/camera/camera/color/camera_info")
-        self.declare_parameter("top_grip_roi_xywh", [498,250, 310, 228])
+        self.declare_parameter("top_grip_roi_xywh", [498,250, 180, 228])
 
         # 프레임 이름
         self.declare_parameter("base_frame", "base_link")
@@ -89,7 +89,7 @@ class IBVSBottomServo(Node):
         self.declare_parameter("bottom_rgb_topic", "/bottom_cam/image_raw")
 
         # YOLO
-        self.declare_parameter("yolo_model_rel", "model/model1.pt")
+        self.declare_parameter("yolo_model_rel", "model/model3.pt")
         self.declare_parameter("yolo_conf", 0.01)
         self.declare_parameter("yolo_sim_conf_thresh", 0.30)  # (IoU + conf) 점수 임계값
 
@@ -97,8 +97,10 @@ class IBVSBottomServo(Node):
         self.declare_parameter("grip_roi_xywh", [63, 83, 360, 471])
 
         # 제어 게인/제약
-        # 제어/추론 주기 (같이 맞춤)
-        self.declare_parameter("ctrl_rate_hz", 3.0)    # 기본 3 Hz
+        # ▷ 제어/추론 주기 분리
+        self.declare_parameter("ctrl_rate_hz", 10.0)     # 제어 루프 Hz (기본 3)
+        self.declare_parameter("yolo_rate_hz", 3.0)     # YOLO 추론 Hz (기본 제어와 동일, 독립 조절)
+
         # 각속도 (wz) 게인
         self.declare_parameter("K_wz_center", 0.8)     # (u_err/fx)(rad) → wz_cam
         self.declare_parameter("w_limit", 0.5)         # 각속도 절대 최대 [rad/s]
@@ -107,7 +109,7 @@ class IBVSBottomServo(Node):
         self.declare_parameter("K_vy", 1.5)
         self.declare_parameter("K_vz", 1.5)
         self.declare_parameter("v_limit", 0.2)        # [m/s]
-        self.declare_parameter("tip_offset_z", 0.12)   # link5 z축 +0.13m
+        self.declare_parameter("tip_offset_z", 0.13)   # link5 z축 +0.13m
         self.declare_parameter("tol_z", 0.02)          # [m]  z 게이트 임계
         self.declare_parameter("tol_xy", 0.02)         # [m]  xy 종료 임계
  
@@ -169,6 +171,11 @@ class IBVSBottomServo(Node):
         self.yolo.model.to('cuda:0' if torch.cuda.is_available() else 'cpu')
         self.yolo_conf = float(self.get_parameter("yolo_conf").value)
         self.sim_conf_thresh = float(self.get_parameter("yolo_sim_conf_thresh").value)
+        # 클래스 이름 맵
+        try:
+            self._class_names = dict(self.yolo.model.names)
+        except Exception:
+            self._class_names = {}
 
         # TF
         self.tfb = Buffer()
@@ -196,6 +203,20 @@ class IBVSBottomServo(Node):
 
         # 지난 프레임에서 성공적으로 계산된 타깃 3D 포인트(베이스 좌표계)
         self._last_target_base = None
+        # YOLO 추론 캐시 & 주기 분리용 상태
+        self._last_yolo_time_s = 0.0
+        self._yolo_seq = 0                    # 매 추론 시 증가
+        self._last_accum_seq = -1             # 누적(클래스 합산)은 새 시퀀스마다 1회만
+        self._last_results_bottom = None      # ultralytics result list (bottom)
+        self._last_results_top = None         # ultralytics result list (top)
+        self._last_bottom_xyxy = []
+        self._last_bottom_conf = []
+        self._last_bottom_cls  = []
+        self._last_top_xyxy = []
+        self._last_top_conf = []
+        self._last_top_cls  = []
+        # 액션 기간 동안 클래스별 conf 누적
+        self._class_conf_sum = {}             # {class_name: summed_conf}
 
         # 디버그 주기 제한용 타임스탬프
         self._last_tri_dump_s   = 0.0
@@ -342,6 +363,20 @@ class IBVSBottomServo(Node):
         self._reached_flag = False
         self._steady_ok = 0
         self._last_target_base = None
+        # YOLO/클래스 누적 상태 초기화
+        self._class_conf_sum = {}
+        self._last_yolo_time_s = 0.0
+        self._yolo_seq = 0
+        self._last_accum_seq = -1
+        self._last_results_bottom = None
+        self._last_results_top = None
+        self._last_bottom_xyxy = []
+        self._last_bottom_conf = []
+        self._last_bottom_cls  = []
+        self._last_top_xyxy = []
+        self._last_top_conf = []
+        self._last_top_cls  = []
+
         # ServoTwist 관련
         self._requested_stop = False
         self._servo_pending = False
@@ -431,24 +466,61 @@ class IBVSBottomServo(Node):
                 alpha=1.0
             )
 
-        # 2) 하단 YOLO + ROI-유사도 선택  (제어주기와 동일한 1회/틱 = 기본 3Hz)
+        # 2) 하단 YOLO + ROI-유사도 선택
+        #    ▷ YOLO는 yolo_rate_hz로만 수행, 제어는 ctrl_rate_hz로 캐시 사용
+
         gx, gy, gw, gh = self.grip_roi
         gr_xyxy = xywh_to_xyxy(gx, gy, gw, gh)
-        results = self.yolo.predict(source=frame, conf=self.yolo_conf,
-                                    save=False, verbose=False, max_det=10)
-        # boxes/conf/kpts 꺼내는 도우미는 여기서 간단히 접근 (results[0].boxes 등)
-        xyxy_b = []
-        conf_b = []
-        if results and results[0].boxes is not None and len(results[0].boxes) > 0:
-            b = results[0].boxes
-            try:
-                arr_xy = b.xyxy.detach().cpu().numpy()
-                arr_cf = b.conf.detach().cpu().numpy()
-            except Exception:
-                arr_xy = b.xyxy.numpy()
-                arr_cf = b.conf.numpy()
-            xyxy_b = arr_xy.astype(int).tolist()
-            conf_b = [float(c) for c in arr_cf.tolist()]
+
+        # ── YOLO 추론 주기 제어 ──
+        now_s = self.get_clock().now().nanoseconds * 1e-9
+        yolo_dt = 1.0 / max(1e-3, float(self.get_parameter("yolo_rate_hz").value))
+        if (now_s - self._last_yolo_time_s) >= yolo_dt:
+            # bottom run
+            results_b = self.yolo.predict(source=frame, conf=self.yolo_conf,
+                                          save=False, verbose=False, max_det=10)
+            self._last_results_bottom = results_b
+            self._last_bottom_xyxy, self._last_bottom_conf, self._last_bottom_cls = [], [], []
+            if results_b and results_b[0].boxes is not None and len(results_b[0].boxes) > 0:
+                bb = results_b[0].boxes
+                try:
+                    arr_xy = bb.xyxy.detach().cpu().numpy()
+                    arr_cf = bb.conf.detach().cpu().numpy()
+                    arr_cl = bb.cls.detach().cpu().numpy()
+                except Exception:
+                    arr_xy = bb.xyxy.numpy(); arr_cf = bb.conf.numpy(); arr_cl = bb.cls.numpy()
+                self._last_bottom_xyxy = arr_xy.astype(int).tolist()
+                self._last_bottom_conf = [float(c) for c in arr_cf.tolist()]
+                self._last_bottom_cls  = [int(c) for c in arr_cl.tolist()]
+            # top run (이미지 있을 때만)
+            if self.top_rgb is not None:
+                try:
+                    top_bgr_for_yolo = self.bridge.imgmsg_to_cv2(self.top_rgb, 'bgr8')
+                    results_t = self.yolo.predict(source=top_bgr_for_yolo, conf=self.yolo_conf,
+                                                  save=False, verbose=False, max_det=10)
+                    self._last_results_top = results_t
+                    self._last_top_xyxy, self._last_top_conf, self._last_top_cls = [], [], []
+                    if results_t and results_t[0].boxes is not None and len(results_t[0].boxes) > 0:
+                        tb = results_t[0].boxes
+                        try:
+                            arr_xy = tb.xyxy.detach().cpu().numpy()
+                            arr_cf = tb.conf.detach().cpu().numpy()
+                            arr_cl = tb.cls.detach().cpu().numpy()
+                        except Exception:
+                            arr_xy = tb.xyxy.numpy(); arr_cf = tb.conf.numpy(); arr_cl = tb.cls.numpy()
+                        self._last_top_xyxy = arr_xy.astype(int).tolist()
+                        self._last_top_conf = [float(c) for c in arr_cf.tolist()]
+                        self._last_top_cls  = [int(c) for c in arr_cl.tolist()]
+                except Exception:
+                    pass
+            # 추론 시각/시퀀스 갱신
+            self._last_yolo_time_s = now_s
+            self._yolo_seq += 1
+
+        # 캐시로부터 선택/제어 입력 구성
+        xyxy_b = list(self._last_bottom_xyxy)
+        conf_b = list(self._last_bottom_conf)
+ 
 
         idx, sim_iou, seg_roi, seg, score = select_yolo_by_roi_similarity(
             bgr=frame,
@@ -490,10 +562,9 @@ class IBVSBottomServo(Node):
                 cv2.rectangle(vis, (x1, y1), (x2, y2), (0,255,0), 2)
                 cv2.line(vis, (int(cx_roi), 0), (int(cx_roi), vis.shape[0]-1), (255,255,0), 1)
                 cv2.circle(vis, (int(cx_box), int(0.5*(y1+y2))), 4, (0,0,255), -1)
-                # txt = f"u_err={ux_err:.1f}px  wz_cam={wz_cam:.3f}"
                 # 하단 키포인트 오버레이 (가능 시)
                 try:
-                    bkobj = getattr(results[0], "keypoints", None)
+                    bkobj = getattr(self._last_results_bottom[0], "keypoints", None) if self._last_results_bottom else None
                     if bkobj is not None and bkobj.xy is not None:
                         bxy_all = bkobj.xy[idx].detach().cpu().numpy() if hasattr(bkobj.xy, "detach") else bkobj.xy[idx]
                         b_kpts = [(float(p[0]), float(p[1])) for p in bxy_all]
@@ -546,8 +617,11 @@ class IBVSBottomServo(Node):
             top_bgr = self.bridge.imgmsg_to_cv2(self.top_rgb, 'bgr8')
             tgx, tgy, tgw, tgh = self.top_grip_roi
             tgr_xyxy = xywh_to_xyxy(tgx, tgy, tgw, tgh)
-            res_top = self.yolo.predict(source=top_bgr, conf=self.yolo_conf, save=False, verbose=False, max_det=10)
-            xyxy_t, conf_t, kpts_t = boxes_conf_kpts(res_top)
+            # (캐시된 top 결과 사용)
+            res_top = self._last_results_top
+            xyxy_t = list(self._last_top_xyxy)
+            conf_t = list(self._last_top_conf)
+
             t_idx, t_iou, t_seg_roi, t_seg, t_score = select_yolo_by_roi_similarity(
                 bgr=top_bgr, gr_xyxy=tgr_xyxy, xyxy_list=xyxy_t, conf_list=conf_t, score_thresh=self.sim_conf_thresh)
             top_valid = (t_idx is not None)
@@ -572,7 +646,7 @@ class IBVSBottomServo(Node):
                     cv2.rectangle(top_dbg, (x1t,y1t), (x2t,y2t), (0,255,0), 2)
                     # 상단 키포인트(전체=노랑, 우리가 쓰는 y2=idx 2=핑크)
                     try:
-                        tkobj = getattr(res_top[0], "keypoints", None)
+                        tkobj = getattr(res_top[0], "keypoints", None) if res_top else None
                         if tkobj is not None and tkobj.xy is not None:
                             txy_all = tkobj.xy[t_idx].detach().cpu().numpy() if hasattr(tkobj.xy, "detach") else tkobj.xy[t_idx]
                             t_kpts = [(float(p[0]), float(p[1])) for p in txy_all]
@@ -597,8 +671,9 @@ class IBVSBottomServo(Node):
         if yolo_valid and top_valid:
             # bottom keypoint y1
             by1 = None; ty2 = None
-            bkpts = getattr(results[0], "keypoints", None)
-            tkpts = getattr(res_top[0], "keypoints", None) if top_valid else None
+            bkpts = getattr(self._last_results_bottom[0], "keypoints", None) if (self._last_results_bottom and yolo_valid) else None
+            tkpts = getattr(res_top[0], "keypoints", None) if (res_top and top_valid) else None
+
             if bkpts is not None and bkpts.xy is not None:
                 try: bxy = bkpts.xy[idx].detach().cpu().numpy()
                 except Exception: bxy = bkpts.xy[idx]
@@ -725,6 +800,16 @@ class IBVSBottomServo(Node):
                                   f"yolo_valid={yolo_valid}, top_valid={top_valid}, "
                                   f"by1={'ok' if by1 is not None else 'None'}, ty2={'ok' if ty2 is not None else 'None'}, "
                                   f"top_info={'ok' if self.top_info is not None else 'None'}")
+        # ── (추가) 클래스 누적: 새 YOLO 시퀀스에서 선택 bbox가 유효하면 1회만 반영 ──
+        if yolo_valid and (self._last_accum_seq != self._yolo_seq):
+            try:
+                cls_id = self._last_bottom_cls[idx]
+                conf_v = float(self._last_bottom_conf[idx])
+                cls_name = self._class_names.get(cls_id, str(cls_id))
+                self._class_conf_sum[cls_name] = self._class_conf_sum.get(cls_name, 0.0) + conf_v
+                self._last_accum_seq = self._yolo_seq
+            except Exception:
+                pass
 
         # ── 삼각측량 실패 시: 이전에 성공했던 타깃을 그대로 사용(업데이트 없음) ──
         if (not tri_ok) and (self._last_target_base is not None):
@@ -894,16 +979,23 @@ class IBVSBottomServo(Node):
                     # 이미 _stop_servo()는 tick 쪽에서 호출됨(안전차원으로 한 번 더 0 퍼블리시)
                     self._stop_servo()
                     goal_handle.succeed()
-                    return VisualServoing.Result(success=True, message="Reached")
+                    # 결과: 누적 클래스 집계
+                    cls_name, cls_sum = self._decide_class()
+                    return VisualServoing.Result(success=True, message="Reached",
+                                                 fruit_class=str(cls_name), fruit_class_conf_sum=float(cls_sum))
 
+                    
                 # 타임아웃
                 if now_s > self._vs_deadline:
                     self.log.warn("[exec_vs] ⏰ TIMEOUT → stopping")
                     self._stop_servo()
                     self._vs_active = False
                     goal_handle.abort()
-                    return VisualServoing.Result(success=False, message="Timeout")
+                    cls_name, cls_sum = self._decide_class()
+                    return VisualServoing.Result(success=False, message="Timeout",
+                                                 fruit_class=str(cls_name), fruit_class_conf_sum=float(cls_sum))
 
+                    
                 # 50ms 간격으로 상태 갱신
                 time.sleep(0.05)
         finally:
@@ -916,16 +1008,31 @@ class IBVSBottomServo(Node):
         # 여기까지 오면 루프가 외부 종료
         if not rclpy.ok():
             self.log.warn("[exec_vs] node is shutting down")
+        cls_name, cls_sum = self._decide_class()
         if self._reached_flag:
             goal_handle.succeed()
-            return VisualServoing.Result(success=True, message="Reached")
+            return VisualServoing.Result(success=True, message="Reached",
+                                         fruit_class=str(cls_name), fruit_class_conf_sum=float(cls_sum))
         elif self._vs_cancel_requested:
             goal_handle.canceled()
-            return VisualServoing.Result(success=False, message="Canceled")
+            return VisualServoing.Result(success=False, message="Canceled",
+                                         fruit_class=str(cls_name), fruit_class_conf_sum=float(cls_sum))
         else:
             goal_handle.abort()
-            return VisualServoing.Result(success=False, message="Aborted")
- 
+            return VisualServoing.Result(success=False, message="Aborted",
+                                         fruit_class=str(cls_name), fruit_class_conf_sum=float(cls_sum))
+
+    # ──────────────────────────────────────────────────────────────
+    # Class decision helper
+    # ──────────────────────────────────────────────────────────────
+    def _decide_class(self):
+        """액션 기간 동안 누적된 클래스별 conf 합에서 최대값을 반환"""
+        if not self._class_conf_sum:
+            return ("", 0.0)
+        name = max(self._class_conf_sum, key=lambda k: self._class_conf_sum[k])
+        return (name, float(self._class_conf_sum[name]))
+
+
 
 def main():
     import rclpy.executors as execs

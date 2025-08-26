@@ -1,9 +1,18 @@
 # DetectStrawberry.action  ─────────────────────────────────────────
 # Goal ------------------------------------------------------------
 float32 offset_z               # ↑optical-Z 로부터 얼마나 떨어진 곳에 접근점?
+uint8  approach_stage                 # 1=STAGE1(초기), 2=STAGE2(재탐지 고정)
+geometry_msgs/Point prev_target_base  # base_link 기준 이전 타깃 3D(2단계에서 사용)
+float32 prev_gate_m                   # 2단계 게이팅 반경(미터), 0이면 게이트 비활성
 ---
 # Result ----------------------------------------------------------
 geometry_msgs/PoseStamped  approach_pose_base
+geometry_msgs/Point        strawberry_center_base   # 선택된 과실 중심(base_link)
 ---
 # Feedback --------------------------------------------------------
 geometry_msgs/PoseStamped  strawberry_pose_cam          # 탐지된 딸기 중심
+
+
+# Notes:
+# - approach_stage: 1 or 2 (no enum in .action; 상수는 코드에서 정의)
+# - prev_target_base/prev_gate_m는 stage==2에서만 의미 있음

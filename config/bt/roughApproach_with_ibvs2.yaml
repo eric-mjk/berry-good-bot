@@ -1,4 +1,4 @@
 # config/bt/roughApproach_with_ibvs.yaml
 
 tree_file_path: "/home/wossas/Desktop/strawberry_robotArm/strawberry_ws/src/berry-good-bot/behavior_trees/roughApproach_with_ibvs2.xml"
-register_node_types: ["ibvs_bt_nodes", "named_pose_nodes", "rough_approach_nodes"]
+register_node_types: ["ibvs_bt_nodes", "named_pose_nodes", "rough_approach_nodes", "utility_nodes"]

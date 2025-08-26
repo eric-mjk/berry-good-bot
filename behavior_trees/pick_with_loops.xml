@@ -22,9 +22,10 @@
 
             <!-- 1) 1차 탐지 (offset 0.05) : 같은 ready에서 최대 3회 재시도 -->
             <RetryUntilSuccessful num_attempts="2">
-              <DetectApproachPose offset_z="0.05"
+              <DetectApproachPose stage="1" offset_z="0.05"
                                   ax="{appr_x}" ay="{appr_y}" az="{appr_z}"
-                                  qx="{appr_qx}" qy="{appr_qy}" qz="{appr_qz}" qw="{appr_qw}"/>           
+                                  qx="{appr_qx}" qy="{appr_qy}" qz="{appr_qz}" qw="{appr_qw}"
+                                  tx="{tar_x}" ty="{tar_y}" tz="{tar_z}"/>
             </RetryUntilSuccessful>
 
             <!-- 2) 접근 서보 -->
@@ -50,9 +51,12 @@
                 <!-- (a) 2차 Detect: 현 위치에서 먼저 시도. 실패 시에만 ready 복귀 후 실패 강제 -->
                 <Fallback name="DetectInPlace_or_ReturnAndRetry">
                   <!-- 성공 경로: Detect 성공 시 Fallback=SUCCESS -->
-                  <DetectApproachPose offset_z="0.01"
+                  <DetectApproachPose stage="2" offset_z="0.01"
+                                      prev_x="{tar_x}" prev_y="{tar_y}" prev_z="{tar_z}"
+                                      prev_gate_m="0.12"
                                       ax="{appr_x}" ay="{appr_y}" az="{appr_z}"
-                                      qx="{appr_qx}" qy="{appr_qy}" qz="{appr_qz}" qw="{appr_qw}"/>
+                                      qx="{appr_qx}" qy="{appr_qy}" qz="{appr_qz}" qw="{appr_qw}"
+                                      tx="{tar_x}" ty="{tar_y}" tz="{tar_z}"/>
                   <!-- 실패 경로: ready로 돌아가고 강제 실패하여 Retry 유도 -->
                   <Sequence>
                     <MoveToNamedPose pose="{ready_pose}"/>
@@ -75,8 +79,8 @@
                 <!-- (c) IBVS: 실패 시 이전 접근 포즈로 복귀 후 재시도(최대 3회) -->
                 <RetryUntilSuccessful num_attempts="1">
                   <Fallback name="IBVS_or_ReturnThenFail">
-                    <!-- IBVS 성공하면 그대로 SUCCESS -->
-                    <VisualServoing timeout="40.0"/>
+                    <!-- IBVS가 성공하면 fruit_class와 basket_pose를 블랙보드에 저장 -->
+                    <VisualServoing timeout="40.0" fruit_class="{fruit}" basket_pose="{basket_pose}"/>
                    <!-- 실패 시: 이전 접근 포즈로 복귀하고 강제 실패해서 Retry 유도 -->
                     <Sequence>
                       <ServoToTargetPose ax="{appr_x}" ay="{appr_y}" az="{appr_z}"
@@ -100,9 +104,12 @@
 
             <MoveToNamedPose pose="{ready_pose}"/>
             <WaitRealRobotSync tolerance="0.01" stable_time="0.7" timeout="30.0"/>
-            <MoveToNamedPose pose="basket"/>
+            <MoveToNamedPose pose="{basket_pose}"/>
             <WaitRealRobotSync tolerance="0.01" stable_time="0.5" timeout="30.0"/>
             <GripperAction mode="open" timeout="8.0"/>
+
+            <!-- 떨어뜨린 뒤 살짝 대기 -->
+            <WaitSeconds seconds="1.5"/>
             <!-- 한 개 완료 후에도 루프 계속 돌기 위해 성공을 고정 -->
             <AlwaysSuccess/>
           </Sequence>
