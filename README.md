@@ -139,14 +139,14 @@ Berry Good Bot은 ROS2 Humble 기반의 자율 딸기 수확 로봇으로, SCARA
     이 Lauch 파일은 로봇 모델(URDF)을 RViz2에 띄우고, Jetson과 아두이노 간의 시리얼 통신을 담당하는 `bridge_node`를 실행합니다.
 
     ```bash
-    ros2 launch berry_serial_bridge testkinematicsControl
+    ros2 launch berry_serial_bridge testkinematicsControl.launch.py
     ```
 
   - **터미널 2: 인식 시스템 실행**
     이 Launch 파일은 RealSense 카메라 드라이버, 딸기 위치를 3D로 추정하는 `perception_node`, 그리고 근접 서보잉을 위한 `visualServoing` 노드를 실행합니다.
 
     ```bash
-    ros2 launch berry_perception perception_bringup
+    ros2 launch berry_perception perception_bringup.launch.py
     ```
 
 ### 2\. 행동 트리(Behavior Tree) 실행
