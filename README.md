@@ -162,7 +162,7 @@ Berry Good Bot은 ROS2 Humble 기반의 자율 딸기 수확 로봇으로, SCARA
 2.  `run_bt.py` 스크립트를 실행합니다.
 
     ```bash
-    python3 run_bt.py
+    python3 scripts/run_bt.py
     ```
 
 #### 동작 시나리오 변경
