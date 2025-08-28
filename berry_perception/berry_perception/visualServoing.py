@@ -109,7 +109,7 @@ class IBVSBottomServo(Node):
         self.declare_parameter("K_vy", 1.5)
         self.declare_parameter("K_vz", 1.5)
         self.declare_parameter("v_limit", 0.2)        # [m/s]
-        self.declare_parameter("tip_offset_z", 0.13)   # link5 z축 +0.13m
+        self.declare_parameter("tip_offset_z", 0.135)   # link5 z축 +0.13m
         self.declare_parameter("tol_z", 0.02)          # [m]  z 게이트 임계
         self.declare_parameter("tol_xy", 0.02)         # [m]  xy 종료 임계
  

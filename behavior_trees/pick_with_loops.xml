@@ -5,6 +5,9 @@
     <Sequence name="RootSeq">
       <!-- 준비: ready pose 리스트 초기화 -->
       <!-- pose_list 는 launch 파라미터로 바꿔도 됨 -->
+      <!-- <PoseListInit pose_list="ready2,ready3"
+                    current="{ready_pose}"
+                    first="{first_ready}"/> -->
       <PoseListInit pose_list="ready,ready1,ready2,ready3"
                     current="{ready_pose}"
                     first="{first_ready}"/>
@@ -101,6 +104,7 @@
 
             <!-- 4) 집게 닫고 바스켓 투입 → 원래 첫 ready로 복귀 -->
             <GripperAction mode="close" timeout="8.0"/>
+            <WaitSeconds seconds="0.7"/>
 
             <MoveToNamedPose pose="{ready_pose}"/>
             <WaitRealRobotSync tolerance="0.01" stable_time="0.7" timeout="30.0"/>
